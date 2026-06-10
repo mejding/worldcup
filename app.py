@@ -19,7 +19,13 @@ from components import (
     recommendation_card,
     status_badge,
 )
-from config import DEFAULT_PROFILE_NAME, PREFERRED_BOOKMAKER, STAKING_PROFILES, get_staking_profile
+from config import (
+    DEFAULT_PROFILE_NAME,
+    PREFERRED_BOOKMAKER,
+    STAKING_PROFILES,
+    get_staking_profile,
+    validate_staking_profile,
+)
 from data_loader import ensure_runtime_data_files, load_predictions, validate_predictions
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from odds_utils import calculate_edge
@@ -47,14 +53,20 @@ def current_profile() -> dict:
     return st.session_state.staking_profile.copy()
 
 
-def load_enriched_predictions() -> tuple[pd.DataFrame, list[str]]:
-    predictions = load_predictions()
-    warnings = validate_predictions(predictions)
-    if any(warning.startswith("CRITICAL:") for warning in warnings):
-        return predictions, warnings
+def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
+    try:
+        predictions = load_predictions()
+    except FileNotFoundError as exc:
+        return pd.DataFrame(), [], [str(exc)]
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(), [], ["Sample predictions file is empty or malformed."]
+
+    warnings, errors = validate_predictions(predictions)
+    if errors:
+        return predictions, warnings, errors
     bankroll = load_bankroll_state()["current_bankroll"]
     enriched = add_recommendations(predictions, bankroll, current_profile())
-    return enriched.rename(columns={"status": "recommendation_status"}), warnings
+    return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors
 
 
 def probability_for_outcome(row, outcome: str) -> float:
@@ -78,19 +90,22 @@ def add_recommended_bet(row, market: str) -> None:
         return
 
     outcome_key = {"Home": "home", "Draw": "draw", "Away": "away"}[outcome]
-    bet = add_bet(
-        match_id=row["match_id"],
-        match=match_label(row),
-        bookmaker=bookmaker,
-        outcome=outcome,
-        odds=row[f"recommended_odds_{market}"],
-        model_probability=probability_for_outcome(row, outcome_key),
-        edge=row[f"recommended_edge_{market}"],
-        full_kelly=row[f"recommended_full_kelly_{market}"],
-        fractional_kelly=row[f"recommended_fractional_kelly_{market}"],
-        stake_dkk=row[f"recommended_stake_{market}"],
-    )
-    st.success(f"Bet tilføjet. Bet ID: {bet['bet_id']}")
+    try:
+        bet = add_bet(
+            match_id=row["match_id"],
+            match=match_label(row),
+            bookmaker=bookmaker,
+            outcome=outcome,
+            odds=row[f"recommended_odds_{market}"],
+            model_probability=probability_for_outcome(row, outcome_key),
+            edge=row[f"recommended_edge_{market}"],
+            full_kelly=row[f"recommended_full_kelly_{market}"],
+            fractional_kelly=row[f"recommended_fractional_kelly_{market}"],
+            stake_dkk=row[f"recommended_stake_{market}"],
+        )
+        st.success(f"Bet tilføjet. Bet ID: {bet['bet_id']}")
+    except ValueError as exc:
+        st.error(str(exc))
 
 
 def outcome_kelly_table(row) -> pd.DataFrame:
@@ -197,12 +212,13 @@ def show_sidebar() -> None:
     st.sidebar.caption(f"Minimum stake: {format_percentage(profile['min_stake_pct_threshold'])}")
 
 
-def show_warnings(warnings: list[str]) -> None:
+def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
     for warning in warnings:
-        if warning.startswith("CRITICAL:"):
-            st.error(warning)
-            st.stop()
         st.warning(warning)
+    for error in errors:
+        st.error(error)
+    if errors:
+        st.stop()
 
 
 def page_overview(df: pd.DataFrame) -> None:
@@ -422,8 +438,11 @@ def page_bankroll() -> None:
     )
 
     history = load_bankroll_history()
-    render_chart(bankroll_history_chart(history))
-    st.dataframe(history, width="stretch", hide_index=True)
+    if history.empty:
+        st.info("No bankroll history yet.")
+    else:
+        render_chart(bankroll_history_chart(history))
+        st.dataframe(history, width="stretch", hide_index=True)
 
     with st.form("manual_bankroll_update"):
         st.subheader("Manual update")
@@ -435,17 +454,23 @@ def page_bankroll() -> None:
             signed_amount = abs(amount) if transaction_type == "deposit" else -abs(amount)
             if transaction_type == "manual correction":
                 signed_amount = amount
-            update_bankroll(signed_amount, transaction_type, note=note)
-            st.success("Bankroll opdateret.")
-            st.rerun()
+            try:
+                update_bankroll(signed_amount, transaction_type, note=note)
+                st.success("Bankroll opdateret.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
     with st.expander("Reset bankroll"):
         new_start = st.number_input("New starting bankroll", min_value=0.0, value=1000.0, step=100.0)
         confirm = st.checkbox("I understand this resets starting and current bankroll")
         if st.button("Reset bankroll", disabled=not confirm):
-            reset_bankroll(new_start)
-            st.success("Bankroll nulstillet.")
-            st.rerun()
+            try:
+                reset_bankroll(new_start)
+                st.success("Bankroll nulstillet.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
 
 def page_bet_log() -> None:
@@ -464,7 +489,10 @@ def page_bet_log() -> None:
         ]
     )
     df = load_bet_log()
-    st.dataframe(df, width="stretch", hide_index=True)
+    if df.empty:
+        st.info("No bets logged yet.")
+    else:
+        st.dataframe(df, width="stretch", hide_index=True)
 
     with st.expander("Add manual bet"):
         with st.form("manual_bet_form"):
@@ -480,20 +508,23 @@ def page_bet_log() -> None:
             fractional_kelly = c3.number_input("fractional_kelly", value=0.0, step=0.01)
             stake_dkk = c1.number_input("stake_dkk", min_value=0.0, value=0.0, step=10.0)
             if st.form_submit_button("Add manual bet"):
-                add_bet(
-                    match_id,
-                    match,
-                    bookmaker,
-                    outcome,
-                    odds,
-                    model_probability,
-                    edge,
-                    full_kelly,
-                    fractional_kelly,
-                    stake_dkk,
-                )
-                st.success("Bet tilføjet.")
-                st.rerun()
+                try:
+                    add_bet(
+                        match_id,
+                        match,
+                        bookmaker,
+                        outcome,
+                        odds,
+                        model_probability,
+                        edge,
+                        full_kelly,
+                        fractional_kelly,
+                        stake_dkk,
+                    )
+                    st.success("Bet tilføjet.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
     pending = df[df["result"] == "pending"] if not df.empty else df
     with st.expander("Settle pending bet", expanded=True):
@@ -568,15 +599,20 @@ def page_settings() -> None:
         "Fractional Kelly", min_value=0.0, max_value=1.0, value=float(profile["fractional_kelly_multiplier"]), step=0.01
     )
     profile["max_stake_pct_of_bankroll"] = st.number_input(
-        "Max stake %", min_value=0.0, max_value=1.0, value=float(profile["max_stake_pct_of_bankroll"]), step=0.005
+        "Max stake %", min_value=0.001, max_value=0.20, value=float(profile["max_stake_pct_of_bankroll"]), step=0.005
     )
     profile["min_edge_threshold"] = st.number_input(
-        "Minimum edge %", min_value=0.0, max_value=1.0, value=float(profile["min_edge_threshold"]), step=0.005
+        "Minimum edge %", min_value=0.0, max_value=0.50, value=float(profile["min_edge_threshold"]), step=0.005
     )
     profile["min_stake_pct_threshold"] = st.number_input(
-        "Minimum stake %", min_value=0.0, max_value=1.0, value=float(profile["min_stake_pct_threshold"]), step=0.001
+        "Minimum stake %", min_value=0.0, max_value=0.20, value=float(profile["min_stake_pct_threshold"]), step=0.001
     )
-    st.session_state.staking_profile = profile
+    setting_errors = validate_staking_profile(profile)
+    if setting_errors:
+        for error in setting_errors:
+            st.error(error)
+    else:
+        st.session_state.staking_profile = profile
     st.session_state.preferred_bookmaker = st.text_input("Preferred bookmaker", st.session_state.preferred_bookmaker)
     st.selectbox("Data mode", ["sample data only for now", "live odds later disabled", "manual CSV later disabled"], disabled=True)
     st.info("Default Standard profile uses 0.25 Kelly, max stake 2.5%, minimum edge 2.5%, and minimum stake 0.25%.")
@@ -601,12 +637,42 @@ def page_about() -> None:
         "this is suitable for testing only. For production, use persistent storage such as Supabase, "
         "Postgres, SQLite with mounted storage, or another database."
     )
+    st.subheader("Health check")
+    try:
+        health_predictions = load_predictions()
+        predictions_ok = "yes"
+        matches_loaded = len(health_predictions)
+    except Exception:
+        predictions_ok = "no"
+        matches_loaded = 0
+    try:
+        load_bankroll_state()
+        bankroll_ok = "yes"
+    except Exception:
+        bankroll_ok = "no"
+    try:
+        health_bets = load_bet_log()
+        bet_log_ok = "yes"
+        bets_logged = len(health_bets)
+    except Exception:
+        bet_log_ok = "no"
+        bets_logged = 0
+    st.write(
+        {
+            "sample_predictions_loaded": predictions_ok,
+            "bankroll_state_loaded": bankroll_ok,
+            "bet_log_loaded": bet_log_ok,
+            "data_mode": "sample",
+            "matches_loaded": matches_loaded,
+            "bets_logged": bets_logged,
+        }
+    )
 
 
 init_session_state()
 show_sidebar()
-df, validation_warnings = load_enriched_predictions()
-show_warnings(validation_warnings)
+df, validation_warnings, validation_errors = load_enriched_predictions()
+show_validation_messages(validation_warnings, validation_errors)
 
 if st.session_state.page == "Overview":
     page_overview(df)

@@ -1,3 +1,18 @@
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_DIR = PROJECT_ROOT / "data"
+
+SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
+BANKROLL_STATE_PATH = DATA_DIR / "bankroll_state.json"
+BANKROLL_HISTORY_PATH = DATA_DIR / "bankroll_history.csv"
+BET_LOG_PATH = DATA_DIR / "bet_log.csv"
+
+BANKROLL_STATE_EXAMPLE_PATH = DATA_DIR / "bankroll_state.example.json"
+BANKROLL_HISTORY_EXAMPLE_PATH = DATA_DIR / "bankroll_history.example.csv"
+BET_LOG_EXAMPLE_PATH = DATA_DIR / "bet_log.example.csv"
+
 STAKING_PROFILES = {
     "Conservative": {
         "fractional_kelly_multiplier": 0.25,
@@ -64,3 +79,21 @@ REQUIRED_PREDICTION_COLUMNS = [
 
 def get_staking_profile(profile_name: str = DEFAULT_PROFILE_NAME) -> dict:
     return STAKING_PROFILES.get(profile_name, STAKING_PROFILES[DEFAULT_PROFILE_NAME]).copy()
+
+
+def validate_staking_profile(profile: dict) -> list[str]:
+    errors = []
+    fractional_kelly = float(profile.get("fractional_kelly_multiplier", -1))
+    max_stake = float(profile.get("max_stake_pct_of_bankroll", -1))
+    min_edge = float(profile.get("min_edge_threshold", -1))
+    min_stake = float(profile.get("min_stake_pct_threshold", -1))
+
+    if not 0 <= fractional_kelly <= 1:
+        errors.append("Fractional Kelly must be between 0 and 1.")
+    if not 0 < max_stake <= 0.20:
+        errors.append("Max stake must be greater than 0 and no more than 20%.")
+    if not 0 <= min_edge <= 0.50:
+        errors.append("Minimum edge must be between 0 and 50%.")
+    if not 0 <= min_stake <= max_stake:
+        errors.append("Minimum stake must be between 0 and max stake.")
+    return errors

@@ -2,10 +2,13 @@ import csv
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Union
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 from bankroll import update_bankroll
+from config import BANKROLL_HISTORY_PATH, BANKROLL_STATE_PATH, BET_LOG_PATH
 
 
 BET_LOG_COLUMNS = [
@@ -27,13 +30,14 @@ BET_LOG_COLUMNS = [
 ]
 
 ALLOWED_RESULTS = {"won", "lost", "void"}
+ALLOWED_BET_RESULTS = {"pending", "won", "lost", "void"}
 
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _ensure_parent_dir(path: str) -> None:
+def _ensure_parent_dir(path: Union[str, Path]) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -43,7 +47,7 @@ def _normalize_settled(value) -> bool:
     return str(value).strip().lower() == "true"
 
 
-def ensure_bet_log_exists(path: str = "data/bet_log.csv") -> None:
+def ensure_bet_log_exists(path: Union[str, Path] = BET_LOG_PATH) -> None:
     bet_log_path = Path(path)
     if bet_log_path.exists():
         return
@@ -54,14 +58,46 @@ def ensure_bet_log_exists(path: str = "data/bet_log.csv") -> None:
         writer.writeheader()
 
 
-def load_bet_log(path: str = "data/bet_log.csv") -> pd.DataFrame:
+def _empty_bet_log(path: Path) -> pd.DataFrame:
+    df = pd.DataFrame(columns=BET_LOG_COLUMNS)
+    _ensure_parent_dir(path)
+    df.to_csv(path, index=False)
+    return df
+
+
+def load_bet_log(path: Union[str, Path] = BET_LOG_PATH) -> pd.DataFrame:
     ensure_bet_log_exists(path)
-    return pd.read_csv(path)
+    path = Path(path)
+    if path.stat().st_size == 0:
+        return _empty_bet_log(path)
+    try:
+        df = pd.read_csv(path)
+    except EmptyDataError:
+        return _empty_bet_log(path)
+    missing_columns = [column for column in BET_LOG_COLUMNS if column not in df.columns]
+    if missing_columns:
+        return _empty_bet_log(path)
+    if not df.empty:
+        df["settled"] = df["settled"].apply(_normalize_settled)
+    return df
 
 
-def save_bet_log(df: pd.DataFrame, path: str = "data/bet_log.csv") -> None:
+def save_bet_log(df: pd.DataFrame, path: Union[str, Path] = BET_LOG_PATH) -> None:
     _ensure_parent_dir(path)
     df.to_csv(path, index=False, columns=BET_LOG_COLUMNS)
+
+
+def _validate_bet_inputs(odds: float, model_probability: float, edge: float, stake_dkk: float) -> None:
+    odds = float(odds)
+    model_probability = float(model_probability)
+    float(edge)
+    stake_dkk = float(stake_dkk)
+    if odds <= 1.0:
+        raise ValueError("Odds must be greater than 1.0.")
+    if not 0 <= model_probability <= 1:
+        raise ValueError("Model probability must be between 0 and 1.")
+    if stake_dkk <= 0:
+        raise ValueError("Stake must be greater than 0.")
 
 
 def add_bet(
@@ -75,8 +111,9 @@ def add_bet(
     full_kelly: float,
     fractional_kelly: float,
     stake_dkk: float,
-    path: str = "data/bet_log.csv",
+    path: Union[str, Path] = BET_LOG_PATH,
 ) -> dict:
+    _validate_bet_inputs(odds, model_probability, edge, stake_dkk)
     ensure_bet_log_exists(path)
     bet = {
         "bet_id": str(uuid.uuid4()),
@@ -116,9 +153,9 @@ def _profit_loss_for_result(row, result: str) -> float:
 def settle_bet(
     bet_id: str,
     result: str,
-    bet_log_path: str = "data/bet_log.csv",
-    bankroll_state_path: str = "data/bankroll_state.json",
-    bankroll_history_path: str = "data/bankroll_history.csv",
+    bet_log_path: Union[str, Path] = BET_LOG_PATH,
+    bankroll_state_path: Union[str, Path] = BANKROLL_STATE_PATH,
+    bankroll_history_path: Union[str, Path] = BANKROLL_HISTORY_PATH,
 ) -> dict:
     if result not in ALLOWED_RESULTS:
         raise ValueError("Result must be one of: won, lost, void.")
@@ -156,7 +193,7 @@ def settle_bet(
 
 def reset_bet_settlement(
     bet_id: str,
-    path: str = "data/bet_log.csv",
+    path: Union[str, Path] = BET_LOG_PATH,
 ) -> dict:
     df = load_bet_log(path)
     matches = df.index[df["bet_id"] == bet_id].tolist()
@@ -174,7 +211,7 @@ def reset_bet_settlement(
     return bet
 
 
-def calculate_bet_summary(path: str = "data/bet_log.csv") -> dict:
+def calculate_bet_summary(path: Union[str, Path] = BET_LOG_PATH) -> dict:
     df = load_bet_log(path)
     if df.empty:
         return {
@@ -194,6 +231,23 @@ def calculate_bet_summary(path: str = "data/bet_log.csv") -> dict:
 
     settled_mask = df["settled"].apply(_normalize_settled)
     settled_df = df[settled_mask]
+    valid_results = df["result"].isin(ALLOWED_BET_RESULTS)
+    df = df[valid_results].copy()
+    if df.empty:
+        return {
+            "total_bets": 0,
+            "pending_bets": 0,
+            "settled_bets": 0,
+            "won_bets": 0,
+            "lost_bets": 0,
+            "void_bets": 0,
+            "total_staked": 0.0,
+            "total_profit_loss": 0.0,
+            "roi": 0.0,
+            "win_rate": 0.0,
+            "average_odds": 0.0,
+            "average_edge": 0.0,
+        }
     won_bets = int((df["result"] == "won").sum())
     lost_bets = int((df["result"] == "lost").sum())
     void_bets = int((df["result"] == "void").sum())
@@ -227,7 +281,7 @@ def add_bet_from_recommendation(
     recommendation: dict,
     model_probability: float,
     market_prefix: str = "best",
-    path: str = "data/bet_log.csv",
+    path: Union[str, Path] = BET_LOG_PATH,
 ) -> dict:
     return add_bet(
         match_id=match_id,
@@ -242,4 +296,3 @@ def add_bet_from_recommendation(
         stake_dkk=recommendation[f"recommended_stake_{market_prefix}"],
         path=path,
     )
-
