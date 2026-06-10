@@ -1,17 +1,33 @@
 from pathlib import Path
+import os
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
 SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
+LIVE_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "live_predictions.csv"
 BANKROLL_STATE_PATH = DATA_DIR / "bankroll_state.json"
 BANKROLL_HISTORY_PATH = DATA_DIR / "bankroll_history.csv"
 BET_LOG_PATH = DATA_DIR / "bet_log.csv"
+FIXTURES_SNAPSHOT_PATH = RAW_DATA_DIR / "fixtures_snapshots.csv"
+ODDS_SNAPSHOT_PATH = RAW_DATA_DIR / "odds_snapshots.csv"
 
 BANKROLL_STATE_EXAMPLE_PATH = DATA_DIR / "bankroll_state.example.json"
 BANKROLL_HISTORY_EXAMPLE_PATH = DATA_DIR / "bankroll_history.example.csv"
 BET_LOG_EXAMPLE_PATH = DATA_DIR / "bet_log.example.csv"
+
+DATA_MODE_OPTIONS = ("sample", "live")
+DATA_MODE = "sample"
+
+ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+ODDS_API_SPORT_KEY = "soccer_fifa_world_cup"
+ODDS_API_REGION = "eu"
+ODDS_API_MARKET = "h2h"
+ODDS_API_ODDS_FORMAT = "decimal"
+PREFERRED_BOOKMAKER_NAMES = ["Danske Spil", "DanskeSpil", "Danske Spil A/S", "danske_spil"]
 
 STAKING_PROFILES = {
     "Conservative": {
@@ -97,3 +113,14 @@ def validate_staking_profile(profile: dict) -> list[str]:
     if not 0 <= min_stake <= max_stake:
         errors.append("Minimum stake must be between 0 and max stake.")
     return errors
+
+
+def get_secret_or_env(name: str, default=None):
+    try:
+        import streamlit as st
+
+        if hasattr(st, "secrets") and name in st.secrets:
+            return st.secrets[name]
+    except Exception:
+        pass
+    return os.environ.get(name, default)

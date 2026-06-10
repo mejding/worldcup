@@ -17,6 +17,20 @@ def _outcome_label(outcome: str) -> str:
 def _build_candidate(row, outcome: str, odds_prefix: str, current_bankroll: float, profile: dict):
     probability = float(row[f"model_{outcome}_prob"])
     odds = float(row[f"{odds_prefix}_{outcome}_odds"])
+    if odds != odds or odds <= 1:
+        candidate = {
+            "outcome": _outcome_label(outcome),
+            "odds": None,
+            "edge": 0,
+            "full_kelly": 0,
+            "fractional_kelly": 0,
+            "final_stake_fraction": 0,
+            "stake": 0,
+            "is_valid": False,
+        }
+        if odds_prefix == "best":
+            candidate["bookmaker"] = row[f"best_{outcome}_bookmaker"]
+        return candidate
     edge = calculate_edge(probability, odds)
     kelly_values = calculate_final_stake_fraction(
         probability,

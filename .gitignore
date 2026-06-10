@@ -8,4 +8,5 @@ venv/
 data/bankroll_state.json
 data/bankroll_history.csv
 data/bet_log.csv
-
+data/raw/*.csv
+data/processed/*.csv

@@ -21,13 +21,32 @@ from components import (
 )
 from config import (
     DEFAULT_PROFILE_NAME,
+    LIVE_PREDICTIONS_PATH,
+    ODDS_API_MARKET,
+    ODDS_API_ODDS_FORMAT,
+    ODDS_API_REGION,
+    ODDS_API_SPORT_KEY,
+    ODDS_SNAPSHOT_PATH,
     PREFERRED_BOOKMAKER,
+    PREFERRED_BOOKMAKER_NAMES,
+    SAMPLE_PREDICTIONS_PATH,
     STAKING_PROFILES,
     get_staking_profile,
+    get_secret_or_env,
     validate_staking_profile,
 )
-from data_loader import ensure_runtime_data_files, load_predictions, validate_predictions
+from data_loader import (
+    ensure_runtime_data_files,
+    get_data_freshness,
+    load_odds_snapshot,
+    load_predictions,
+    load_predictions_by_mode,
+    validate_predictions,
+)
+from fetch_fixtures import fetch_worldcup_fixtures
+from fetch_odds import append_odds_snapshot, fetch_odds_from_api
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
+from live_data_pipeline import build_live_predictions
 from odds_utils import calculate_edge
 from recommendations import add_recommendations
 
@@ -47,6 +66,10 @@ def init_session_state() -> None:
         st.session_state.preferred_bookmaker = PREFERRED_BOOKMAKER
     if "selected_match_id" not in st.session_state:
         st.session_state.selected_match_id = None
+    if "data_mode" not in st.session_state:
+        st.session_state.data_mode = "sample"
+    if "active_data_mode" not in st.session_state:
+        st.session_state.active_data_mode = "sample"
 
 
 def current_profile() -> dict:
@@ -55,13 +78,15 @@ def current_profile() -> dict:
 
 def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
     try:
-        predictions = load_predictions()
+        predictions, mode_warnings, actual_mode = load_predictions_by_mode(st.session_state.data_mode)
+        st.session_state.active_data_mode = actual_mode
     except FileNotFoundError as exc:
         return pd.DataFrame(), [], [str(exc)]
     except pd.errors.EmptyDataError:
         return pd.DataFrame(), [], ["Sample predictions file is empty or malformed."]
 
     warnings, errors = validate_predictions(predictions)
+    warnings = mode_warnings + warnings
     if errors:
         return predictions, warnings, errors
     bankroll = load_bankroll_state()["current_bankroll"]
@@ -204,6 +229,7 @@ def show_sidebar() -> None:
     )
     st.sidebar.divider()
     st.sidebar.metric("Current bankroll", format_dkk(state["current_bankroll"]))
+    st.sidebar.caption(f"Data mode: {st.session_state.active_data_mode.title()}")
     st.sidebar.caption(f"Kelly profile: {st.session_state.kelly_profile_name}")
     profile = current_profile()
     st.sidebar.caption(f"Fractional Kelly: {format_percentage(profile['fractional_kelly_multiplier'])}")
@@ -228,12 +254,21 @@ def page_overview(df: pd.DataFrame) -> None:
     metric_row(
         [
             ("Current bankroll", format_dkk(load_bankroll_state()["current_bankroll"])),
+            ("Data mode", st.session_state.active_data_mode.title()),
             ("Matches", str(len(df))),
             ("DS recommendations", str(counts.get("Playable at Danske Spil", 0))),
             ("Better elsewhere", str(counts.get("Better elsewhere", 0))),
-            ("No bet", str(counts.get("No bet", 0))),
         ]
     )
+    freshness = get_data_freshness(
+        LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
+    )
+    st.caption(f"Last updated: {freshness['last_modified'] or 'not available'} | Rows loaded: {len(df)}")
+    if st.session_state.active_data_mode == "live":
+        st.info(
+            "Live mode currently uses market-implied probabilities as model probabilities. "
+            "Historical ML model probabilities will be added later."
+        )
 
     with st.expander("Filtre", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -583,6 +618,90 @@ def page_analytics() -> None:
 
 def page_settings() -> None:
     st.title("Settings")
+    st.subheader("Data mode")
+    selected_mode_label = st.radio(
+        "Choose data source",
+        ["Sample data", "Live odds data"],
+        index=0 if st.session_state.data_mode == "sample" else 1,
+        horizontal=True,
+    )
+    st.session_state.data_mode = "sample" if selected_mode_label == "Sample data" else "live"
+    api_key_configured = bool(get_secret_or_env("ODDS_API_KEY"))
+    live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
+    st.write(
+        {
+            "ODDS_API_KEY configured": api_key_configured,
+            "last live refresh": live_freshness["last_modified"],
+            "live row count": live_freshness["row_count"],
+        }
+    )
+    if st.session_state.data_mode == "live" and not live_freshness["file_exists"]:
+        st.warning("Live predictions are missing. The app will fall back to sample data until odds are fetched.")
+    if st.button("Fetch latest odds"):
+        api_key = get_secret_or_env("ODDS_API_KEY")
+        if not api_key:
+            st.error("ODDS_API_KEY is not configured. Add it via environment variable or Streamlit secrets.")
+        else:
+            try:
+                odds_df = fetch_odds_from_api(
+                    api_key=api_key,
+                    sport_key=ODDS_API_SPORT_KEY,
+                    region=ODDS_API_REGION,
+                    market=ODDS_API_MARKET,
+                    odds_format=ODDS_API_ODDS_FORMAT,
+                )
+                if odds_df.empty:
+                    st.warning("Odds API returned no odds. Keeping current data mode.")
+                else:
+                    append_odds_snapshot(odds_df, ODDS_SNAPSHOT_PATH)
+                    fixtures_df = fetch_worldcup_fixtures(odds_df=odds_df)
+                    live_df = build_live_predictions(
+                        odds_df,
+                        fixtures_df=fixtures_df,
+                        preferred_bookmaker_names=PREFERRED_BOOKMAKER_NAMES,
+                    )
+                    live_warnings, live_errors = validate_predictions(live_df)
+                    if live_errors:
+                        for error in live_errors:
+                            st.error(error)
+                    else:
+                        for warning in live_warnings:
+                            st.warning(warning)
+                        st.session_state.data_mode = "live"
+                        st.success(f"Live odds fetched. Built {len(live_df)} app-ready matches.")
+                        st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"Could not fetch live odds: {exc}")
+
+    odds_snapshot = load_odds_snapshot()
+    st.subheader("Odds data")
+    if odds_snapshot.empty:
+        st.info("No odds snapshots stored yet.")
+    else:
+        complete_events = 0
+        for _, event_df in odds_snapshot.groupby("event_id"):
+            outcomes = set(event_df["outcome_name"].astype(str).str.lower())
+            if "draw" in outcomes or "tie" in outcomes:
+                complete_events += 1
+        preferred_count = odds_snapshot[
+            odds_snapshot["bookmaker_title"].isin(PREFERRED_BOOKMAKER_NAMES)
+            | odds_snapshot["bookmaker_key"].isin(PREFERRED_BOOKMAKER_NAMES)
+        ]["event_id"].nunique()
+        st.write(
+            {
+                "odds rows stored": len(odds_snapshot),
+                "latest fetched_at": odds_snapshot["fetched_at"].max(),
+                "bookmakers": odds_snapshot["bookmaker_title"].nunique(),
+                "events": odds_snapshot["event_id"].nunique(),
+                "preferred bookmaker event count": preferred_count,
+                "events with draw odds": complete_events,
+            }
+        )
+
+    st.divider()
+    st.subheader("Kelly")
     profile_name = st.selectbox(
         "Kelly profile",
         list(STAKING_PROFILES.keys()),
@@ -614,7 +733,6 @@ def page_settings() -> None:
     else:
         st.session_state.staking_profile = profile
     st.session_state.preferred_bookmaker = st.text_input("Preferred bookmaker", st.session_state.preferred_bookmaker)
-    st.selectbox("Data mode", ["sample data only for now", "live odds later disabled", "manual CSV later disabled"], disabled=True)
     st.info("Default Standard profile uses 0.25 Kelly, max stake 2.5%, minimum edge 2.5%, and minimum stake 0.25%.")
 
 
@@ -662,7 +780,7 @@ def page_about() -> None:
             "sample_predictions_loaded": predictions_ok,
             "bankroll_state_loaded": bankroll_ok,
             "bet_log_loaded": bet_log_ok,
-            "data_mode": "sample",
+            "data_mode": st.session_state.active_data_mode,
             "matches_loaded": matches_loaded,
             "bets_logged": bets_logged,
         }

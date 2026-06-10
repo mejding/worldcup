@@ -9,14 +9,16 @@ The app uses sample data only. It is ready for local use and Streamlit Community
 - Core odds and edge calculations
 - Kelly staking with configurable profiles
 - Danske Spil vs best market recommendation comparison
+- Optional live odds ingestion via The Odds API or a compatible h2h odds provider
 - Local bankroll tracking
 - Bet log, settlement and double-settlement protection
 - Streamlit dashboard with sample World Cup 2026 group-stage data
 
 ## MVP Limitations
 
-- `data/sample_predictions.csv` is the only match source.
-- Model probabilities, Danske Spil odds and best market odds are sample inputs.
+- Sample mode uses `data/sample_predictions.csv`; live mode can generate `data/processed/live_predictions.csv` from odds API data.
+- In sample mode, model probabilities, Danske Spil odds and best market odds are sample inputs.
+- In live mode, model probabilities currently use market-implied probabilities until the historical model is added later.
 - Draw-context is explanatory only in this MVP.
 - Bankroll and bet log are stored as local CSV/JSON files.
 - The tool is for analysis and tracking. It does not guarantee profit.
@@ -97,17 +99,61 @@ They are intentionally ignored by git. Deployment-safe example files are committ
 
 If an example file is missing, the app creates safe defaults with valid headers and a 1000 DKK starting bankroll.
 
+Live odds mode also writes runtime files that are ignored by git:
+
+- `data/raw/odds_snapshots.csv`
+- `data/raw/fixtures_snapshots.csv`
+- `data/processed/live_predictions.csv`
+
+Raw odds snapshots are appended. Processed live predictions are regenerated into the same schema as `data/sample_predictions.csv`.
+
 ## Streamlit Secrets
 
-No secrets are required for the MVP.
+No secrets are required for sample data mode.
 
-`.streamlit/secrets.toml.example` documents the future live-odds placeholder:
+Live odds mode requires `ODDS_API_KEY`.
 
-```toml
-ODDS_API_KEY = "your_api_key_here"
+Local environment variable:
+
+```bash
+export ODDS_API_KEY="your_key"
 ```
 
-Do not commit real secrets.
+Or create a local `.streamlit/secrets.toml` file:
+
+```toml
+ODDS_API_KEY = "your_key"
+```
+
+For Streamlit Community Cloud, add this in app secrets:
+
+```toml
+ODDS_API_KEY = "your_key"
+```
+
+Do not commit real secrets. `.streamlit/secrets.toml.example` is committed only as documentation.
+
+## Live Odds Mode
+
+Sample data mode works without API keys. Live odds mode requires an API key from The Odds API or a compatible provider that supports football 1X2/h2h odds.
+
+Live mode currently does this:
+
+- Fetches h2h odds for `soccer_fifa_world_cup`
+- Normalizes bookmaker/outcome rows
+- Detects draw outcomes such as `Draw`, `Tie`, `X` or `Uafgjort`
+- Identifies Danske Spil odds when available
+- Identifies best home/draw/away odds across bookmakers
+- Calculates consensus fair market probabilities by removing overround per bookmaker, averaging fair probabilities and normalizing again
+- Builds `data/processed/live_predictions.csv`
+
+Because the historical ML model has not been added yet, live mode sets:
+
+- `model_home_prob = market_home_prob`
+- `model_draw_prob = market_draw_prob`
+- `model_away_prob = market_away_prob`
+
+Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app will still work with best market odds where possible, and it falls back to sample data if live data is unavailable or invalid.
 
 ## Kelly Profiles
 
@@ -139,6 +185,7 @@ Example:
 - If Streamlit Cloud says the app is not connected to GitHub, push the current branch to a GitHub repository and select that repository in Streamlit Cloud.
 - If the app cannot find `sample_predictions.csv`, confirm that `data/sample_predictions.csv` is committed.
 - If bankroll or bet-log files are missing, restart the app; runtime files are recreated automatically.
+- If live odds mode says `ODDS_API_KEY` is missing, add it via environment variable or Streamlit secrets.
+- If the odds API returns no events, rate limits or omits draw odds, the app keeps sample/current data and shows a warning.
 - If a bet cannot be settled, check that it is still pending. Double settlement is intentionally blocked.
 - If the app shows sample-data validation errors, fix `data/sample_predictions.csv` and redeploy.
-

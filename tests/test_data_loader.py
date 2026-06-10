@@ -80,9 +80,9 @@ def test_detect_invalid_probabilities():
 
 def test_detect_invalid_odds():
     df = _valid_predictions()
-    df.loc[0, "ds_home_odds"] = 1.0
+    df.loc[0, "best_home_odds"] = 1.0
 
     warnings, errors = validate_predictions(df)
 
     assert warnings == []
-    assert "All odds values must be numeric and greater than 1.0." in errors
+    assert "Best market odds values must be numeric and greater than 1.0." in errors
