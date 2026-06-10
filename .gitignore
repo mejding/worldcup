@@ -1,0 +1,11 @@
+.env
+__pycache__/
+.pytest_cache/
+.DS_Store
+venv/
+.venv/
+.streamlit/secrets.toml
+data/bankroll_state.json
+data/bankroll_history.csv
+data/bet_log.csv
+

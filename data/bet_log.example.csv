@@ -1,0 +1,2 @@
+bet_id,timestamp,match_id,match,bookmaker,outcome,odds,model_probability,edge,full_kelly,fractional_kelly,stake_dkk,result,profit_loss_dkk,settled
+
