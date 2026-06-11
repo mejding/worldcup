@@ -6,9 +6,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
+HISTORICAL_DATA_DIR = DATA_DIR / "historical"
+MODELS_DIR = DATA_DIR / "models"
 
 SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
 LIVE_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "live_predictions.csv"
+MODEL_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "model_predictions.csv"
+LIVE_PREDICTIONS_WITH_MODEL_PATH = PROCESSED_DATA_DIR / "live_predictions_with_model.csv"
+TRAINING_DATASET_PATH = PROCESSED_DATA_DIR / "training_dataset.csv"
+MODEL_EVALUATION_PATH = PROCESSED_DATA_DIR / "model_evaluation.csv"
+HISTORICAL_RESULTS_PATH = HISTORICAL_DATA_DIR / "international_results.csv"
+MODEL_PATH = MODELS_DIR / "model.pkl"
+MODEL_METADATA_PATH = MODELS_DIR / "model_metadata.json"
+FEATURE_COLUMNS_PATH = MODELS_DIR / "feature_columns.json"
 BANKROLL_STATE_PATH = DATA_DIR / "bankroll_state.json"
 BANKROLL_HISTORY_PATH = DATA_DIR / "bankroll_history.csv"
 BET_LOG_PATH = DATA_DIR / "bet_log.csv"
@@ -21,6 +31,8 @@ BET_LOG_EXAMPLE_PATH = DATA_DIR / "bet_log.example.csv"
 
 DATA_MODE_OPTIONS = ("sample", "live")
 DATA_MODE = "sample"
+MODEL_SOURCE_OPTIONS = ("market_only", "historical_model", "historical_model_if_available")
+MODEL_SOURCE = "historical_model_if_available"
 
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 ODDS_API_SPORT_KEY = "soccer_fifa_world_cup"

@@ -10,3 +10,6 @@ data/bankroll_history.csv
 data/bet_log.csv
 data/raw/*.csv
 data/processed/*.csv
+data/historical/international_results.csv
+data/models/*.pkl
+data/models/*.json

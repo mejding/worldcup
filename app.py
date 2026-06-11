@@ -25,7 +25,11 @@ from components import (
 )
 from config import (
     DEFAULT_PROFILE_NAME,
+    HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
+    LIVE_PREDICTIONS_WITH_MODEL_PATH,
+    MODEL_PREDICTIONS_PATH,
+    MODEL_SOURCE,
     ODDS_API_MARKET,
     ODDS_API_ODDS_FORMAT,
     ODDS_API_REGION,
@@ -49,10 +53,15 @@ from data_loader import (
 )
 from fetch_fixtures import fetch_worldcup_fixtures
 from fetch_odds import append_odds_snapshot, fetch_odds_from_api
+from features import build_training_dataset
+from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import build_live_predictions
+from model_registry import get_active_model_status
 from odds_utils import calculate_edge
+from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
+from train_model import train_historical_model
 
 
 st.set_page_config(page_title="VM 2026 Prediction & Kelly", page_icon="⚽", layout="wide")
@@ -74,6 +83,10 @@ def init_session_state() -> None:
         st.session_state.data_mode = "sample"
     if "active_data_mode" not in st.session_state:
         st.session_state.active_data_mode = "sample"
+    if "model_source" not in st.session_state:
+        st.session_state.model_source = MODEL_SOURCE
+    if "active_model_source" not in st.session_state:
+        st.session_state.active_model_source = "market_only"
 
 
 def current_profile() -> dict:
@@ -82,8 +95,17 @@ def current_profile() -> dict:
 
 def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
     try:
-        predictions, mode_warnings, actual_mode = load_predictions_by_mode(st.session_state.data_mode)
+        predictions, mode_warnings, actual_mode = load_predictions_by_mode(
+            st.session_state.data_mode,
+            model_source=st.session_state.model_source,
+        )
         st.session_state.active_data_mode = actual_mode
+        st.session_state.active_model_source = (
+            "market_only"
+            if st.session_state.model_source == "market_only"
+            or any("market probabilities" in warning.lower() for warning in mode_warnings)
+            else "historical_model"
+        )
     except FileNotFoundError as exc:
         return pd.DataFrame(), [], [str(exc)]
     except pd.errors.EmptyDataError:
@@ -285,6 +307,7 @@ def show_sidebar() -> None:
     mode_path = LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
     freshness = get_data_freshness(mode_path)
     st.sidebar.caption(f"Mode: {st.session_state.active_data_mode.title()}")
+    st.sidebar.caption(f"Model: {st.session_state.active_model_source.replace('_', ' ').title()}")
     st.sidebar.caption(f"Rows: {freshness['row_count']}")
     st.sidebar.caption(f"Updated: {freshness['last_modified'] or '-'}")
     if st.session_state.active_data_mode == "live":
@@ -326,6 +349,7 @@ def page_overview(df: pd.DataFrame) -> None:
             "Live mode currently uses market-implied probabilities as model probabilities. "
             "Historical ML model probabilities will be added later."
         )
+    st.caption(f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}")
 
     with st.expander("Filtre", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
@@ -428,7 +452,8 @@ def page_match_detail(df: pd.DataFrame) -> None:
     st.title(match_label(row))
     st.caption(
         f"{row['kickoff_time']} | Group {row['group']} | Matchday {row['matchday']} | "
-        f"Data mode: {st.session_state.active_data_mode.title()}"
+        f"Data mode: {st.session_state.active_data_mode.title()} | "
+        f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}"
     )
 
     h1, h2, h3 = st.columns(3)
@@ -448,6 +473,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
     )
     c1, c2 = st.columns([1, 1.2])
     c1.subheader("Probability comparison")
+    c1.caption("Market probabilities are derived from bookmaker odds. Model probabilities use the selected model source.")
     c1.dataframe(
         prob_df.style.format({"Model": "{:.1%}", "Market": "{:.1%}"}),
         width="stretch",
@@ -766,6 +792,85 @@ def page_settings() -> None:
                 st.error(str(exc))
             except Exception as exc:
                 st.error(f"Could not fetch live odds: {exc}")
+
+    st.divider()
+    st.subheader("Model source")
+    model_source_label = st.radio(
+        "Choose model probability source",
+        ["Market only", "Historical model", "Historical model if available"],
+        index={"market_only": 0, "historical_model": 1, "historical_model_if_available": 2}.get(
+            st.session_state.model_source, 2
+        ),
+        horizontal=True,
+    )
+    st.session_state.model_source = {
+        "Market only": "market_only",
+        "Historical model": "historical_model",
+        "Historical model if available": "historical_model_if_available",
+    }[model_source_label]
+    if st.session_state.model_source == "market_only":
+        st.info("Using market-implied probabilities as model probabilities.")
+
+    status = get_active_model_status()
+    cols = st.columns(4)
+    with cols[0]:
+        metric_card("Model available", "Yes" if status["model_exists"] else "No")
+    with cols[1]:
+        metric_card("Training rows", str(status["number_of_training_rows"]))
+    with cols[2]:
+        metric_card("Accuracy", "-" if status["accuracy"] is None else format_percentage(status["accuracy"]))
+    with cols[3]:
+        metric_card("Log loss", "-" if status["log_loss"] is None else f"{status['log_loss']:.3f}")
+    brier_text = "-" if status["brier_score"] is None else f"{status['brier_score']:.3f}"
+    draw_actual = "-" if status["draw_rate_actual"] is None else format_percentage(status["draw_rate_actual"])
+    draw_predicted = "-" if status["draw_rate_predicted"] is None else format_percentage(status["draw_rate_predicted"])
+    st.caption(
+        f"Trained at: {status['trained_at'] or '-'} | Test rows: {status['number_of_test_rows']} | "
+        f"Brier: {brier_text} | Draw actual/predicted: {draw_actual} / {draw_predicted}"
+    )
+
+    train_col, apply_col = st.columns(2)
+    with train_col:
+        if st.button("Train/update historical model"):
+            try:
+                raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                hist_warnings, hist_errors = validate_historical_results(raw)
+                for warning in hist_warnings:
+                    st.warning(warning)
+                if hist_errors:
+                    for error in hist_errors:
+                        st.error(error)
+                else:
+                    standardized = standardize_historical_results(raw)
+                    training_df = build_training_dataset(standardized)
+                    metadata = train_historical_model(training_df)
+                    st.success(
+                        f"Model trained. Accuracy: {format_percentage(metadata['metrics']['accuracy'])}, "
+                        f"log loss: {metadata['metrics']['log_loss']:.3f}"
+                    )
+            except FileNotFoundError:
+                st.error("No historical data file found. Add data/historical/international_results.csv to train the model.")
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"Could not train model: {exc}")
+    with apply_col:
+        if st.button("Apply model to current matches"):
+            try:
+                base_df, _, actual_mode = load_predictions_by_mode(st.session_state.data_mode, model_source="market_only")
+                raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                standardized = standardize_historical_results(raw)
+                output_path = LIVE_PREDICTIONS_WITH_MODEL_PATH if actual_mode == "live" else MODEL_PREDICTIONS_PATH
+                _, model_warnings = predict_upcoming_matches(base_df, standardized, output_path=output_path)
+                for warning in model_warnings:
+                    st.warning(warning)
+                st.session_state.model_source = "historical_model"
+                st.success("Historical model probabilities applied to current matches.")
+                st.rerun()
+            except FileNotFoundError:
+                st.error("No historical data file or trained model found. Train the model first.")
+            except Exception as exc:
+                st.error(f"Could not apply model: {exc}")
 
     odds_snapshot = load_odds_snapshot()
     st.subheader("Odds data")

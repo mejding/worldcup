@@ -159,6 +159,51 @@ Because the historical ML model has not been added yet, live mode sets:
 
 Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app will still work with best market odds where possible, and it falls back to sample data if live data is unavailable or invalid.
 
+## Historical Model
+
+Sprint 6 adds the first historical international football model. It is intentionally simple: a multinomial logistic regression predicting home win, draw and away win.
+
+Place historical data here:
+
+```text
+data/historical/international_results.csv
+```
+
+Required columns:
+
+- `date`
+- `home_team`
+- `away_team`
+- `home_score`
+- `away_score`
+
+Strongly preferred columns:
+
+- `tournament`
+- `neutral`
+
+The model uses broader international football data rather than World Cup-only data, because World Cup-only results are too sparse. Supported match types can include World Cup, Euros, Copa América, AFCON, Asian Cup, Gold Cup, qualifiers, Nations League and friendlies.
+
+Current features include tournament flags, team historical win/draw/loss rates, recent form, goals for/against, relative differences and simple Elo features. Features are generated using only matches before the match being predicted.
+
+Train from the Streamlit Settings page with `Train/update historical model`, then apply it to current matches with `Apply model to current matches`.
+
+Command-line training is also available:
+
+```bash
+python train_model.py --input data/historical/international_results.csv
+```
+
+Metrics shown:
+
+- Accuracy
+- Log loss
+- Multiclass Brier score
+- Actual draw rate
+- Predicted draw rate
+
+Market probabilities remain an important benchmark and are preserved in the app. Model probabilities replace only `model_home_prob`, `model_draw_prob` and `model_away_prob` when the historical model is selected and applied.
+
 ## Kelly Profiles
 
 The default profile is Standard:

@@ -15,6 +15,8 @@ from config import (
     BET_LOG_PATH,
     DATA_DIR,
     LIVE_PREDICTIONS_PATH,
+    LIVE_PREDICTIONS_WITH_MODEL_PATH,
+    MODEL_PREDICTIONS_PATH,
     ODDS_SNAPSHOT_PATH,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
@@ -180,30 +182,63 @@ def load_predictions_by_mode(
     mode: str,
     sample_path: Union[str, Path] = SAMPLE_PREDICTIONS_PATH,
     live_path: Union[str, Path] = LIVE_PREDICTIONS_PATH,
+    model_source: str = "market_only",
+    model_predictions_path: Union[str, Path] = MODEL_PREDICTIONS_PATH,
+    live_with_model_path: Union[str, Path] = LIVE_PREDICTIONS_WITH_MODEL_PATH,
 ) -> tuple[pd.DataFrame, list[str], str]:
     warnings = []
+    if model_source in {"historical_model", "historical_model_if_available"}:
+        candidate = Path(live_with_model_path if mode == "live" else model_predictions_path)
+        if candidate.exists() and candidate.stat().st_size > 0:
+            try:
+                model_df = pd.read_csv(candidate)
+                model_warnings, model_errors = validate_predictions(model_df)
+                if not model_errors:
+                    warnings.extend(model_warnings)
+                    return model_df, warnings, mode
+            except Exception:
+                pass
+        message = "Historical model predictions are missing. Falling back to market probabilities."
+        if model_source == "historical_model":
+            warnings.append(message)
+        elif model_source == "historical_model_if_available":
+            warnings.append("No trained model predictions found. Using market probabilities.")
+
     if mode == "sample":
-        return load_predictions(sample_path), warnings, "sample"
+        df = load_predictions(sample_path)
+        if model_source in {"market_only", "historical_model_if_available", "historical_model"}:
+            df = _use_market_as_model(df)
+        return df, warnings, "sample"
     if mode != "live":
         warnings.append(f"Unknown data mode '{mode}', falling back to sample data.")
-        return load_predictions(sample_path), warnings, "sample"
+        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
 
     live_path = Path(live_path)
     if not live_path.exists() or live_path.stat().st_size == 0:
         warnings.append("Live predictions are missing. Falling back to sample data.")
-        return load_predictions(sample_path), warnings, "sample"
+        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
     try:
         live_df = pd.read_csv(live_path)
     except (EmptyDataError, pd.errors.ParserError):
         warnings.append("Live predictions are empty or malformed. Falling back to sample data.")
-        return load_predictions(sample_path), warnings, "sample"
+        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
     live_warnings, live_errors = validate_predictions(live_df)
     if live_errors:
         warnings.extend(live_warnings)
         warnings.append("Live predictions are invalid. Falling back to sample data.")
         return load_predictions(sample_path), warnings, "sample"
     warnings.extend(live_warnings)
+    if model_source in {"market_only", "historical_model_if_available", "historical_model"}:
+        live_df = _use_market_as_model(live_df)
     return live_df, warnings, "live"
+
+
+def _use_market_as_model(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    result["model_home_prob"] = result["market_home_prob"]
+    result["model_draw_prob"] = result["market_draw_prob"]
+    result["model_away_prob"] = result["market_away_prob"]
+    return result
 
 
 def get_data_freshness(path: Union[str, Path]) -> dict:
