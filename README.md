@@ -59,6 +59,10 @@ streamlit run app.py
 - Settings: Kelly profiles, manual staking overrides, preferred bookmaker and data mode
 - About: methodology, limitations, storage warning and health check
 
+## Sprint 5B UI Polish
+
+The dashboard layout has been polished with KPI cards, cleaner recommendation cards, a more compact match overview, better bankroll and bet log sections, and a clearer draw-context visual indicator. Core model, odds, Kelly and recommendation logic are unchanged.
+
 ## GitHub Setup
 
 1. Create a GitHub repository.

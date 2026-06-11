@@ -4,6 +4,15 @@ import streamlit as st
 
 
 def probability_comparison_chart(df: pd.DataFrame):
+    if not isinstance(df, pd.DataFrame):
+        row = df
+        df = pd.DataFrame(
+            {
+                "Outcome": ["Home", "Draw", "Away"],
+                "Model": [row["model_home_prob"], row["model_draw_prob"], row["model_away_prob"]],
+                "Market": [row["market_home_prob"], row["market_draw_prob"], row["market_away_prob"]],
+            }
+        )
     chart_df = df.melt(
         id_vars=["Outcome"],
         value_vars=["Model", "Market"],
@@ -17,8 +26,14 @@ def probability_comparison_chart(df: pd.DataFrame):
         color="Source",
         barmode="group",
         text=chart_df["Probability"].map(lambda value: f"{value:.1%}"),
+        color_discrete_map={"Model": "#2563eb", "Market": "#64748b"},
     )
-    fig.update_layout(yaxis_tickformat=".0%", height=340, margin=dict(l=10, r=10, t=30, b=10))
+    fig.update_layout(
+        yaxis_tickformat=".0%",
+        height=320,
+        margin=dict(l=10, r=10, t=20, b=10),
+        legend_title_text="",
+    )
     return fig
 
 
@@ -55,4 +70,3 @@ def render_chart(fig) -> None:
         st.info("Ingen data at vise endnu.")
     else:
         st.plotly_chart(fig, width="stretch")
-
