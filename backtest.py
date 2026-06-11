@@ -7,8 +7,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from backtest_reports import evaluate_by_segment, create_backtest_report
-from calibration import create_confidence_calibration_bins, create_draw_calibration_table
-from config import (
+from backtest_paths import (
     BACKTEST_BY_SEGMENT_PATH,
     BACKTEST_CALIBRATION_BINS_PATH,
     BACKTEST_DRAW_CALIBRATION_PATH,
@@ -19,6 +18,8 @@ from config import (
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
 )
+from calibration import create_confidence_calibration_bins, create_draw_calibration_table
+from config import PROCESSED_DATA_DIR
 from evaluation import calculate_prediction_metrics
 from features import _empty_stats, _feature_row, _update_elo, _update_stats, build_training_dataset, categorize_tournament
 from train_model import predict_with_model, train_model_in_memory

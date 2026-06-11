@@ -20,10 +20,10 @@ from config import (
     ODDS_SNAPSHOT_PATH,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
-    REPORTS_DIR,
     REQUIRED_PREDICTION_COLUMNS,
     SAMPLE_PREDICTIONS_PATH,
 )
+from backtest_paths import REPORTS_DIR
 from bankroll import BANKROLL_HISTORY_COLUMNS, DEFAULT_BANKROLL_STATE, save_bankroll_state
 from bet_log import BET_LOG_COLUMNS
 

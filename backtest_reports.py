@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BACKTEST_REPORT_PATH
+from backtest_paths import BACKTEST_REPORT_PATH
 from evaluation import calculate_prediction_metrics
 
 

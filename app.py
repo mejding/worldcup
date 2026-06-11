@@ -31,13 +31,15 @@ from components import (
     small_sample_warning,
     status_badge,
 )
-from config import (
+from backtest_paths import (
     BACKTEST_BY_SEGMENT_PATH,
     BACKTEST_CALIBRATION_BINS_PATH,
     BACKTEST_DRAW_CALIBRATION_PATH,
     BACKTEST_PREDICTIONS_PATH,
     BACKTEST_REPORT_PATH,
     BACKTEST_SUMMARY_PATH,
+)
+from config import (
     DEFAULT_PROFILE_NAME,
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,

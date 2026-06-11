@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BACKTEST_BY_SEGMENT_PATH, BACKTEST_PREDICTIONS_PATH, BACKTEST_SUMMARY_PATH, MODEL_METADATA_PATH, MODEL_PATH
+from backtest_paths import BACKTEST_BY_SEGMENT_PATH, BACKTEST_PREDICTIONS_PATH, BACKTEST_SUMMARY_PATH
+from config import MODEL_METADATA_PATH, MODEL_PATH
 
 
 def model_exists(model_path: Path = MODEL_PATH) -> bool:
