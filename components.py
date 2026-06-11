@@ -189,10 +189,10 @@ def calibration_gap_badge(gap) -> str:
 
 def model_metric_explanation(metric_name: str) -> str:
     explanations = {
-        "Accuracy": "Share of matches where highest probability outcome matched result.",
-        "Log loss": "Probability quality metric; lower is better.",
-        "Brier score": "Squared probability error; lower is better.",
-        "ECE": "Calibration error; lower is better.",
+        "Accuracy": TOOLTIPS["accuracy"],
+        "Log loss": TOOLTIPS["log_loss"],
+        "Brier score": TOOLTIPS["brier_score"],
+        "ECE": TOOLTIPS["ece"],
         "Draw calibration gap": "Predicted draw rate minus actual draw rate.",
     }
     return explanations.get(metric_name, "")
@@ -325,21 +325,18 @@ def draw_context_card_v2(
     score = 0 if pd.isna(score) else int(score)
     label = label if not pd.isna(label) else "Low"
     if label == "High":
-        explanation = "High draw-context. Pay extra attention to draw probability and draw edge."
+        explanation = "High draw-context. Look closer at draw probability and draw edge."
     elif label == "Medium":
-        explanation = "Moderate draw-context. Draw may be contextually relevant, but the signal is not strong."
+        explanation = "Moderate contextual signs that a draw may be strategically plausible. The signal is not strong by itself."
     else:
         explanation = "Low draw-context. Match context does not especially point toward a strategic draw."
     with st.container(border=True):
         c1, c2 = st.columns([1.1, 2.4])
-        c1.metric("Draw-context", f"{score}/100", label, help=TOOLTIPS["draw_context"])
+        c1.metric("Draw-context", f"{score}/100", label, help=TOOLTIPS["draw_context_score"])
         c2.caption(explanation)
-        c2.caption("Draw-context is not draw probability and never triggers a bet alone.")
+        c2.caption("Draw-context is not draw probability, not a recommendation, and never triggers a bet alone.")
         with st.expander("Draw-context details"):
-            st.write(
-                {
-                    "mutual_draw_acceptance": format_probability(mutual_draw_acceptance),
-                    "both_teams_draw_satisfied": bool(both_teams_draw_satisfied),
-                    "one_team_must_win": bool(one_team_must_win),
-                }
-            )
+            st.metric("Mutual acceptance", format_probability(mutual_draw_acceptance), help=TOOLTIPS["mutual_acceptance"])
+            st.caption(f"Both teams draw satisfied: {'Yes' if bool(both_teams_draw_satisfied) else 'No'}")
+            st.caption(f"One team must win: {'Yes' if bool(one_team_must_win) else 'No'}")
+            st.caption("Never bet draw based only on draw-context. Use it as a prompt to inspect draw probability, odds and edge.")

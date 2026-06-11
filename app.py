@@ -240,6 +240,127 @@ def recommendation_summary(row, market: str) -> str:
     )
 
 
+def no_bet_reason(row, market: str) -> str:
+    profile = current_profile()
+    prefix = "ds" if market == "ds" else "best"
+    outcomes = ["home", "draw", "away"]
+    odds_values = [row.get(f"{prefix}_{outcome}_odds") for outcome in outcomes]
+    if all(pd.isna(odds) or float(odds) <= 1 for odds in odds_values):
+        return "Missing odds for this market."
+
+    candidates = []
+    for outcome in outcomes:
+        odds = row.get(f"{prefix}_{outcome}_odds")
+        if pd.isna(odds) or float(odds) <= 1:
+            continue
+        probability = probability_for_outcome(row, outcome)
+        edge = calculate_edge(probability, float(odds))
+        kelly_values = calculate_final_stake_fraction(
+            probability,
+            float(odds),
+            profile["fractional_kelly_multiplier"],
+            profile["max_stake_pct_of_bankroll"],
+        )
+        candidates.append(
+            {
+                "edge": edge,
+                "final_stake_fraction": kelly_values["final_stake_fraction"],
+            }
+        )
+    if not candidates:
+        return "Probability source unavailable or odds missing."
+    best_edge = max(candidate["edge"] for candidate in candidates)
+    best_stake_fraction = max(candidate["final_stake_fraction"] for candidate in candidates)
+    if best_edge < profile["min_edge_threshold"]:
+        return (
+            f"Edge below minimum threshold. Best edge is {format_percentage(best_edge)}; "
+            f"minimum is {format_percentage(profile['min_edge_threshold'])}."
+        )
+    if best_stake_fraction < profile["min_stake_pct_threshold"]:
+        return (
+            f"Kelly stake below minimum. Best stake fraction is {format_percentage(best_stake_fraction)}; "
+            f"minimum is {format_percentage(profile['min_stake_pct_threshold'])}."
+        )
+    return "No outcome passes both edge and Kelly thresholds."
+
+
+def probability_source_label(row) -> str:
+    source = row.get("active_probability_source", st.session_state.probability_source)
+    label = PROBABILITY_SOURCE_LABELS.get(source, source)
+    if source == "ensemble" and not pd.isna(row.get("ensemble_w_market")):
+        return f"{label} {float(row.get('ensemble_w_market')):.0%}/{float(row.get('ensemble_w_model')):.0%}"
+    return label
+
+
+def format_bet_log_table(df: pd.DataFrame) -> pd.DataFrame:
+    display_columns = [
+        "timestamp",
+        "match",
+        "kickoff_time_dk",
+        "bookmaker",
+        "outcome",
+        "odds",
+        "edge",
+        "fractional_kelly",
+        "stake_dkk",
+        "result",
+        "profit_loss_dkk",
+        "settled",
+    ]
+    result = df[[column for column in display_columns if column in df.columns]].copy()
+    rename = {
+        "timestamp": "Logged",
+        "match": "Match",
+        "kickoff_time_dk": "Kickoff DK",
+        "bookmaker": "Bookmaker",
+        "outcome": "Outcome",
+        "odds": "Odds",
+        "edge": "Edge",
+        "fractional_kelly": "Kelly",
+        "stake_dkk": "Stake",
+        "result": "Result",
+        "profit_loss_dkk": "P/L",
+        "settled": "Settled",
+    }
+    result = result.rename(columns=rename)
+    for column in ["Odds"]:
+        if column in result.columns:
+            result[column] = result[column].map(format_odds)
+    for column in ["Edge", "Kelly"]:
+        if column in result.columns:
+            result[column] = result[column].map(format_percentage)
+    for column in ["Stake", "P/L"]:
+        if column in result.columns:
+            result[column] = result[column].map(format_dkk)
+    return result
+
+
+def app_health_rows(df: pd.DataFrame) -> pd.DataFrame:
+    model_status = get_active_model_status()
+    backtest_status = get_latest_backtest_status()
+    odds_freshness = get_data_freshness(ODDS_SNAPSHOT_PATH)
+    live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
+    bet_log = load_bet_log()
+    bankroll_loaded = True
+    try:
+        load_bankroll_state()
+    except Exception:
+        bankroll_loaded = False
+    checks = [
+        ("Data mode", st.session_state.active_data_mode.title(), "Sample uses static data; live requires fetched odds."),
+        ("Matches loaded", str(len(df)), "Upcoming matches available in the current app mode."),
+        ("Active probability source", PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source), "Used for edge and Kelly."),
+        ("Model available", "Yes" if model_status["model_exists"] else "No", "Train/apply model in Settings if needed."),
+        ("Ensemble available", "Yes" if ENSEMBLE_PREDICTIONS_PATH.exists() else "No", "Run or apply ensemble from Ensemble page."),
+        ("Bankroll loaded", "Yes" if bankroll_loaded else "No", "Runtime bankroll JSON is readable."),
+        ("Bet log loaded", "Yes", f"{len(bet_log)} bets logged."),
+        ("Live predictions", f"{live_freshness['row_count']} rows", live_freshness["last_modified"] or "No live predictions file."),
+        ("Latest odds update", odds_freshness["last_modified"] or "No odds snapshots yet", "Fetch odds in Settings."),
+        ("Latest backtest update", backtest_status["last_modified"] or "No backtest yet", "Run backtest from Backtest & Metrics."),
+    ]
+    return pd.DataFrame(checks, columns=["Check", "Status", "What to do"])
+
+
 def add_recommended_bet(row, market: str) -> None:
     if market == "ds":
         outcome = row["recommended_outcome_ds"]
@@ -257,6 +378,7 @@ def add_recommended_bet(row, market: str) -> None:
         bet = add_bet(
             match_id=row["match_id"],
             match=match_label(row),
+            kickoff_time_dk=row.get("kickoff_time_dk", ""),
             bookmaker=bookmaker,
             outcome=outcome,
             odds=row[f"recommended_odds_{market}"],
@@ -266,7 +388,9 @@ def add_recommended_bet(row, market: str) -> None:
             fractional_kelly=row[f"recommended_fractional_kelly_{market}"],
             stake_dkk=row[f"recommended_stake_{market}"],
         )
-        st.success(f"Bet tilføjet. Bet ID: {bet['bet_id']}")
+        st.success(
+            f"Bet tilføjet til Bet Log. Bankroll ændres først, når bettet afregnes. Bet ID: {bet['bet_id']}"
+        )
     except ValueError as exc:
         st.error(str(exc))
 
@@ -521,6 +645,10 @@ def page_overview(df: pd.DataFrame) -> None:
             rec_cols = st.columns([2.2, 2.4, 1])
             rec_cols[0].caption(f"DS: {recommendation_summary(row, 'ds')}")
             rec_cols[1].caption(f"Best: {recommendation_summary(row, 'best')}")
+            if row["recommendation_status"] == "No bet":
+                rec_cols[0].caption(f"Reason: {no_bet_reason(row, 'best')}")
+            elif row["recommended_outcome_ds"] == "No bet":
+                rec_cols[0].caption(f"DS reason: {no_bet_reason(row, 'ds')}")
             if rec_cols[2].button("Vælg kamp", key=f"select_{row['match_id']}"):
                 st.session_state.selected_match_id = row["match_id"]
                 st.session_state.page = "Match Detail"
@@ -540,6 +668,8 @@ def page_overview(df: pd.DataFrame) -> None:
                 on_click=add_recommended_bet,
                 args=(row, "best"),
             )
+            if row["recommended_outcome_ds"] == "No bet" or row["recommended_outcome_best"] == "No bet":
+                st.caption("Disabled add buttons mean the market does not pass the configured edge and Kelly thresholds.")
 
     table_columns = [
         "kickoff_time_dk",
@@ -593,11 +723,15 @@ def page_match_detail(df: pd.DataFrame) -> None:
 
     h1, h2, h3 = st.columns(3)
     with h1:
-        metric_card("Model probabilities", f"H {format_percentage(row['model_home_prob'])}", f"U {format_percentage(row['model_draw_prob'])} | A {format_percentage(row['model_away_prob'])}")
+        metric_card("Active probabilities", f"H {format_probability(row.get('active_home_prob', row['model_home_prob']))}", f"U {format_probability(row.get('active_draw_prob', row['model_draw_prob']))} | A {format_probability(row.get('active_away_prob', row['model_away_prob']))}")
     with h2:
-        metric_card("Danske Spil odds", f"H {format_odds(row['ds_home_odds'])}", f"U {format_odds(row['ds_draw_odds'])} | A {format_odds(row['ds_away_odds'])}")
+        metric_card("Market probabilities", f"H {format_probability(row['market_home_prob'])}", f"U {format_probability(row['market_draw_prob'])} | A {format_probability(row['market_away_prob'])}")
     with h3:
-        metric_card("Best market odds", f"H {format_odds(row['best_home_odds'])}", f"U {format_odds(row['best_draw_odds'])} | A {format_odds(row['best_away_odds'])}")
+        metric_card("Model probabilities", f"H {format_probability(row['model_home_prob'])}", f"U {format_probability(row['model_draw_prob'])} | A {format_probability(row['model_away_prob'])}")
+    st.caption(
+        f"Recommendations and Kelly use: {probability_source_label(row)}. "
+        "If model and market probabilities are identical, the app is currently using market fallback."
+    )
 
     prob_df = pd.DataFrame(
         {
@@ -615,7 +749,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
         prob_df["Ensemble"] = [row.get("ensemble_home_prob"), row.get("ensemble_draw_prob"), row.get("ensemble_away_prob")]
     c1, c2 = st.columns([1, 1.2])
     c1.subheader("Probability comparison")
-    c1.caption(f"Active Kelly source: {row.get('active_probability_source', st.session_state.probability_source)}")
+    c1.caption(f"Active Kelly source: {probability_source_label(row)}")
     c1.dataframe(
         prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
         width="stretch",
@@ -640,8 +774,11 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_edge_ds"],
             row["recommended_fractional_kelly_ds"],
             row["recommended_stake_ds"],
-            PROBABILITY_SOURCE_LABELS.get(row.get("active_probability_source", st.session_state.probability_source), row.get("active_probability_source", st.session_state.probability_source)),
+            probability_source_label(row),
+            reason=no_bet_reason(row, "ds"),
         )
+        if row["recommended_outcome_ds"] == "No bet":
+            st.caption(f"Why disabled: {no_bet_reason(row, 'ds')}")
         st.button(
             "Add Danske Spil recommendation to bet log",
             disabled=row["recommended_outcome_ds"] == "No bet",
@@ -658,8 +795,11 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_edge_best"],
             row["recommended_fractional_kelly_best"],
             row["recommended_stake_best"],
-            PROBABILITY_SOURCE_LABELS.get(row.get("active_probability_source", st.session_state.probability_source), row.get("active_probability_source", st.session_state.probability_source)),
+            probability_source_label(row),
+            reason=no_bet_reason(row, "best"),
         )
+        if row["recommended_outcome_best"] == "No bet":
+            st.caption(f"Why disabled: {no_bet_reason(row, 'best')}")
         st.button(
             "Add Best Market recommendation to bet log",
             disabled=row["recommended_outcome_best"] == "No bet",
@@ -730,6 +870,10 @@ def page_bankroll() -> None:
 
 def page_bet_log() -> None:
     st.title("Bet Log")
+    st.caption(
+        "Adding a bet does not change bankroll. Settlement updates bankroll exactly once: won adds profit, "
+        "lost subtracts stake, and void leaves bankroll unchanged. Kickoff is shown in Danish time when available."
+    )
     summary = calculate_bet_summary()
     cols = st.columns(6)
     with cols[0]:
@@ -755,21 +899,21 @@ def page_bet_log() -> None:
 
     with tab_all:
         if df.empty:
-            empty_state("No bets logged yet. Add a recommendation from Match Detail or enter a manual bet.")
+            empty_state("No bets logged yet. Select a match, inspect the recommendation, then add a DS or best-market bet from Match Detail.")
         else:
-            st.dataframe(df, width="stretch", hide_index=True)
+            st.dataframe(format_bet_log_table(df), width="stretch", hide_index=True)
 
     with tab_pending:
         if pending.empty:
-            empty_state("No pending bets.")
+            empty_state("No pending bets. Adding a bet does not change bankroll until you settle it.")
         else:
-            st.dataframe(pending, width="stretch", hide_index=True)
+            st.dataframe(format_bet_log_table(pending), width="stretch", hide_index=True)
 
     with tab_settled:
         if settled.empty:
-            empty_state("No settled bets yet.")
+            empty_state("No settled bets yet. Settled wins add profit only, losses subtract stake, and void bets change nothing.")
         else:
-            st.dataframe(settled, width="stretch", hide_index=True)
+            st.dataframe(format_bet_log_table(settled), width="stretch", hide_index=True)
 
     with tab_manual:
         with st.form("manual_bet_form"):
@@ -787,18 +931,18 @@ def page_bet_log() -> None:
             if st.form_submit_button("Add manual bet"):
                 try:
                     add_bet(
-                        match_id,
-                        match,
-                        bookmaker,
-                        outcome,
-                        odds,
-                        model_probability,
-                        edge,
-                        full_kelly,
-                        fractional_kelly,
-                        stake_dkk,
+                        match_id=match_id,
+                        match=match,
+                        bookmaker=bookmaker,
+                        outcome=outcome,
+                        odds=odds,
+                        model_probability=model_probability,
+                        edge=edge,
+                        full_kelly=full_kelly,
+                        fractional_kelly=fractional_kelly,
+                        stake_dkk=stake_dkk,
                     )
-                    st.success("Bet tilføjet.")
+                    st.success("Bet tilføjet. Bankroll ændres først ved settlement.")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
@@ -813,6 +957,7 @@ def page_bet_log() -> None:
             st.write(
                 {
                     "match": selected["match"],
+                    "kickoff_time_dk": selected.get("kickoff_time_dk", ""),
                     "bookmaker": selected["bookmaker"],
                     "outcome": selected["outcome"],
                     "odds": selected["odds"],
@@ -823,7 +968,7 @@ def page_bet_log() -> None:
             if st.button("Settle bet"):
                 try:
                     settle_bet(bet_id, result)
-                    st.success("Bet afregnet, og bankroll er opdateret.")
+                    st.success("Bet afregnet. Bankroll er opdateret præcis én gang for dette bet.")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
@@ -1537,18 +1682,18 @@ def page_settings() -> None:
     st.info("Default Standard profile uses 0.25 Kelly, max stake 2.5%, minimum edge 2.5%, and minimum stake 0.25%.")
 
 
-def page_about() -> None:
+def page_about(df: pd.DataFrame) -> None:
     st.title("About")
     st.subheader("What this app does")
     st.write("A World Cup prediction and staking dashboard for comparing model/market probabilities, Danske Spil odds, best market odds, edge and Kelly-based stake suggestions.")
     st.subheader("Current MVP/live odds limitations")
-    st.write("Sample mode uses static data. Live mode can ingest odds, but model probabilities currently equal market-implied probabilities until the historical model is added.")
+    st.write("Sample mode uses static data. Live mode can ingest odds when an API key is configured. If no applied model predictions are available, model probabilities fall back to market-implied probabilities.")
     st.subheader("Kelly and edge")
-    st.write("Edge is `model_probability * odds - 1`. Kelly stake depends heavily on probability quality, so fractional Kelly and stake caps are used to reduce risk.")
+    st.write("Edge is `active_probability * odds - 1`. Kelly stake uses current bankroll, fractional Kelly and stake caps to reduce risk.")
     st.subheader("Danske Spil vs best market")
     st.write("The app keeps Danske Spil recommendations separate from best-market recommendations, so value elsewhere is visible even if DS is not playable.")
     st.subheader("Draw-context")
-    st.write("Draw-context is explanatory only. It is not a manual draw bonus and does not change probabilities in the MVP.")
+    st.write("Draw-context is a contextual signal only. It is not draw probability, not a recommendation and should never trigger a draw bet by itself.")
     st.subheader("What comes next")
     st.write("Historical model, backtest, draw hypothesis modelling and a market-aware ensemble.")
     st.subheader("Responsible staking")
@@ -1559,35 +1704,13 @@ def page_about() -> None:
         "Postgres, SQLite with mounted storage, or another database."
     )
     st.subheader("Health check")
-    try:
-        health_predictions = load_predictions()
-        predictions_ok = "yes"
-        matches_loaded = len(health_predictions)
-    except Exception:
-        predictions_ok = "no"
-        matches_loaded = 0
-    try:
-        load_bankroll_state()
-        bankroll_ok = "yes"
-    except Exception:
-        bankroll_ok = "no"
-    try:
-        health_bets = load_bet_log()
-        bet_log_ok = "yes"
-        bets_logged = len(health_bets)
-    except Exception:
-        bet_log_ok = "no"
-        bets_logged = 0
-    st.write(
-        {
-            "sample_predictions_loaded": predictions_ok,
-            "bankroll_state_loaded": bankroll_ok,
-            "bet_log_loaded": bet_log_ok,
-            "data_mode": st.session_state.active_data_mode,
-            "matches_loaded": matches_loaded,
-            "bets_logged": bets_logged,
-        }
-    )
+    st.caption("App status: data mode, matches loaded, active probability source, model, ensemble, bankroll, bet log, odds and backtest freshness.")
+    st.dataframe(app_health_rows(df), width="stretch", hide_index=True)
+    with st.expander("If the app feels incomplete"):
+        st.write(
+            "Check whether you are in sample mode, whether live odds have been fetched, whether the historical model "
+            "has been trained and applied, and whether an ensemble has been selected as the active probability source."
+        )
 
 
 init_session_state()
@@ -1614,4 +1737,4 @@ elif st.session_state.page == "Ensemble":
 elif st.session_state.page == "Settings":
     page_settings()
 else:
-    page_about()
+    page_about(df)

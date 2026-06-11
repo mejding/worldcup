@@ -60,6 +60,45 @@ streamlit run app.py
 - Settings: Kelly profiles, manual staking overrides, preferred bookmaker and data mode
 - About: methodology, limitations, storage warning and health check
 
+## End-to-End Flow
+
+1. Open `Overview` and scan upcoming matches, active probabilities, draw-context and recommendation status.
+2. Select a match to open `Match Detail`.
+3. Compare market, model and active probabilities, then inspect Danske Spil and best-market recommendations separately.
+4. Add a recommended bet from Match Detail only if the card is not `No bet`.
+5. Open `Bet Log` to review pending bets. Adding a bet does not change bankroll.
+6. Settle a pending bet as `won`, `lost` or `void`.
+7. Bankroll updates exactly once when the bet is settled. Wins add profit only, losses subtract stake, void bets do not change bankroll.
+8. Review `Bankroll` and `Analytics` for updated tracking.
+
+## Interpreting Recommendations
+
+- `Playable at Danske Spil`: the active probability source finds value at Danske Spil odds after edge and Kelly thresholds.
+- `Better elsewhere`: Danske Spil does not qualify, but the best tracked market odds do.
+- `No bet`: no outcome passes the configured edge and Kelly thresholds, odds are missing, or the final stake is below the minimum.
+
+Each recommendation uses `edge = active_probability * odds - 1`. Kelly stake is calculated from the current bankroll, not starting bankroll, because stake sizing should reflect the money currently available.
+
+The active probability source may be market, historical model, draw-context model or ensemble. If market/model/active percentages are identical, the app is likely using market fallback because model predictions have not been applied.
+
+## Draw-Context
+
+Draw-context is not draw probability and not a betting recommendation. It is a contextual signal for whether a draw may be strategically plausible. High draw-context should prompt a closer look at draw probability, draw odds and draw edge, but never a draw bet by itself.
+
+## Danish Time
+
+Raw `kickoff_time` values are preserved for data compatibility, but visible kickoff times are shown as `kickoff_time_dk` in `Europe/Copenhagen`, for example `14. juni 2026, 22:00 dansk tid`.
+
+## If the App Feels Incomplete
+
+Check `About` -> `Health check`:
+
+- whether sample or live data is active
+- whether live odds have been fetched
+- whether a historical model is trained and applied
+- whether ensemble predictions exist
+- whether bankroll and bet log runtime files are loaded
+
 ## Sprint 5B UI Polish
 
 The dashboard layout has been polished with KPI cards, cleaner recommendation cards, a more compact match overview, better bankroll and bet log sections, and a clearer draw-context visual indicator. Core model, odds, Kelly and recommendation logic are unchanged.

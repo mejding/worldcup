@@ -16,6 +16,7 @@ BET_LOG_COLUMNS = [
     "timestamp",
     "match_id",
     "match",
+    "kickoff_time_dk",
     "bookmaker",
     "outcome",
     "odds",
@@ -74,9 +75,10 @@ def load_bet_log(path: Union[str, Path] = BET_LOG_PATH) -> pd.DataFrame:
         df = pd.read_csv(path)
     except EmptyDataError:
         return _empty_bet_log(path)
-    missing_columns = [column for column in BET_LOG_COLUMNS if column not in df.columns]
-    if missing_columns:
-        return _empty_bet_log(path)
+    for column in BET_LOG_COLUMNS:
+        if column not in df.columns:
+            df[column] = "" if column == "kickoff_time_dk" else None
+    df = df[BET_LOG_COLUMNS]
     if not df.empty:
         df["settled"] = df["settled"].apply(_normalize_settled)
     return df
@@ -111,6 +113,7 @@ def add_bet(
     full_kelly: float,
     fractional_kelly: float,
     stake_dkk: float,
+    kickoff_time_dk: str = "",
     path: Union[str, Path] = BET_LOG_PATH,
 ) -> dict:
     _validate_bet_inputs(odds, model_probability, edge, stake_dkk)
@@ -120,6 +123,7 @@ def add_bet(
         "timestamp": _timestamp(),
         "match_id": match_id,
         "match": match,
+        "kickoff_time_dk": kickoff_time_dk,
         "bookmaker": bookmaker,
         "outcome": outcome,
         "odds": float(odds),
@@ -281,6 +285,7 @@ def add_bet_from_recommendation(
     recommendation: dict,
     model_probability: float,
     market_prefix: str = "best",
+    kickoff_time_dk: str = "",
     path: Union[str, Path] = BET_LOG_PATH,
 ) -> dict:
     return add_bet(
@@ -294,5 +299,6 @@ def add_bet_from_recommendation(
         full_kelly=recommendation[f"recommended_full_kelly_{market_prefix}"],
         fractional_kelly=recommendation[f"recommended_fractional_kelly_{market_prefix}"],
         stake_dkk=recommendation[f"recommended_stake_{market_prefix}"],
+        kickoff_time_dk=kickoff_time_dk,
         path=path,
     )

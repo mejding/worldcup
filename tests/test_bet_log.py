@@ -59,6 +59,56 @@ def test_adding_a_bet_creates_pending_unsettled_bet(tmp_path):
     assert bool(df.iloc[0]["settled"]) is False
 
 
+def test_adding_a_bet_can_store_danish_kickoff_time(tmp_path):
+    bet = add_bet(
+        match_id="M001",
+        match="Mexico vs South Africa",
+        kickoff_time_dk="11. juni 2026, 22:00 dansk tid",
+        bookmaker="Danske Spil",
+        outcome="Home",
+        odds=2.0,
+        model_probability=0.55,
+        edge=0.10,
+        full_kelly=0.10,
+        fractional_kelly=0.025,
+        stake_dkk=25.0,
+        path=str(tmp_path / "bet_log.csv"),
+    )
+
+    assert bet["kickoff_time_dk"] == "11. juni 2026, 22:00 dansk tid"
+
+
+def test_old_bet_log_files_are_backfilled_without_being_reset(tmp_path):
+    path = tmp_path / "old_bet_log.csv"
+    pd.DataFrame(
+        [
+            {
+                "bet_id": "B1",
+                "timestamp": "2026-06-11T10:00:00+00:00",
+                "match_id": "M001",
+                "match": "Mexico vs South Africa",
+                "bookmaker": "Danske Spil",
+                "outcome": "Home",
+                "odds": 2.0,
+                "model_probability": 0.55,
+                "edge": 0.10,
+                "full_kelly": 0.10,
+                "fractional_kelly": 0.025,
+                "stake_dkk": 25.0,
+                "result": "pending",
+                "profit_loss_dkk": 0.0,
+                "settled": False,
+            }
+        ]
+    ).to_csv(path, index=False)
+
+    df = load_bet_log(path)
+
+    assert len(df) == 1
+    assert "kickoff_time_dk" in df.columns
+    assert df.iloc[0]["bet_id"] == "B1"
+
+
 def test_settling_won_bet_updates_bet_and_bankroll(tmp_path):
     paths = _paths(tmp_path)
     reset_bankroll(1000.0, state_path=paths["state"], history_path=paths["history"])
@@ -197,4 +247,3 @@ def test_bet_summary_calculations_work(tmp_path):
     assert summary["win_rate"] == pytest.approx(0.5)
     assert summary["average_odds"] == pytest.approx(3.0)
     assert summary["average_edge"] == pytest.approx(0.10)
-
