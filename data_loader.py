@@ -27,6 +27,7 @@ from backtest_paths import REPORTS_DIR
 from bankroll import BANKROLL_HISTORY_COLUMNS, DEFAULT_BANKROLL_STATE, save_bankroll_state
 from bet_log import BET_LOG_COLUMNS
 from probability_sources import apply_probability_source
+from time_utils import add_danish_kickoff_column
 
 RUNTIME_FILE_PAIRS = {
     BANKROLL_STATE_PATH: BANKROLL_STATE_EXAMPLE_PATH,
@@ -42,7 +43,7 @@ def load_sample_predictions(path: Union[str, Path] = SAMPLE_PREDICTIONS_PATH) ->
 def load_predictions(path: Union[str, Path] = SAMPLE_PREDICTIONS_PATH) -> pd.DataFrame:
     if not Path(path).exists():
         raise FileNotFoundError(f"Sample predictions file not found: {path}")
-    return pd.read_csv(path)
+    return add_danish_kickoff_column(pd.read_csv(path))
 
 
 def validate_predictions(df: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -194,7 +195,7 @@ def load_predictions_by_mode(
         candidate = Path(live_with_model_path if mode == "live" else model_predictions_path)
         if candidate.exists() and candidate.stat().st_size > 0:
             try:
-                model_df = pd.read_csv(candidate)
+                model_df = add_danish_kickoff_column(pd.read_csv(candidate))
                 model_warnings, model_errors = validate_predictions(model_df)
                 if not model_errors:
                     warnings.extend(model_warnings)
@@ -221,7 +222,7 @@ def load_predictions_by_mode(
         warnings.append("Live predictions are missing. Falling back to sample data.")
         return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
     try:
-        live_df = pd.read_csv(live_path)
+        live_df = add_danish_kickoff_column(pd.read_csv(live_path))
     except (EmptyDataError, pd.errors.ParserError):
         warnings.append("Live predictions are empty or malformed. Falling back to sample data.")
         return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"

@@ -25,7 +25,7 @@ from components import (
     best_source_card,
     calibration_gap_badge,
     draw_context_badge,
-    draw_context_card,
+    draw_context_card_v2,
     draw_context_decision_card,
     draw_context_score_badge,
     draw_hypothesis_summary_card,
@@ -34,12 +34,14 @@ from components import (
     format_dkk,
     format_odds,
     format_percentage,
+    format_probability,
     metric_card,
     metric_improvement_badge,
     metric_row,
     model_metric_explanation,
     odds_comparison_table,
-    recommendation_card,
+    outcome_label,
+    recommendation_card_v2,
     probability_source_badge,
     small_sample_caveat,
     small_sample_warning,
@@ -115,10 +117,14 @@ from probability_sources import (
 )
 from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
+from time_utils import add_danish_kickoff_column
+from tooltip_definitions import TOOLTIPS
 from train_model import train_historical_model
+from ui_theme import apply_custom_theme
 
 
 st.set_page_config(page_title="VM 2026 Prediction & Kelly", page_icon="⚽", layout="wide")
+apply_custom_theme()
 ensure_runtime_data_files()
 
 
@@ -161,6 +167,7 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
             st.session_state.data_mode,
             model_source=st.session_state.model_source,
         )
+        predictions = add_danish_kickoff_column(predictions)
         st.session_state.active_data_mode = actual_mode
         st.session_state.active_model_source = (
             "market_only"
@@ -214,6 +221,23 @@ def probability_for_outcome(row, outcome: str) -> float:
 
 def match_label(row) -> str:
     return f"{row['home_team']} vs {row['away_team']}"
+
+
+def recommendation_outcome_label(row, market: str) -> str:
+    outcome = row.get(f"recommended_outcome_{market}", "No bet")
+    return outcome_label(outcome, row["home_team"], row["away_team"])
+
+
+def recommendation_summary(row, market: str) -> str:
+    outcome = row.get(f"recommended_outcome_{market}", "No bet")
+    if outcome == "No bet" or pd.isna(outcome):
+        return "No bet"
+    bookmaker = row.get("recommended_bookmaker_best") if market == "best" else None
+    bookmaker_text = f" · {bookmaker}" if bookmaker else ""
+    return (
+        f"{recommendation_outcome_label(row, market)} @ {format_odds(row[f'recommended_odds_{market}'])}"
+        f"{bookmaker_text} · Stake {format_dkk(row[f'recommended_stake_{market}'])}"
+    )
 
 
 def add_recommended_bet(row, market: str) -> None:
@@ -316,8 +340,11 @@ def style_edge_table(df: pd.DataFrame):
 def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
     display_df = df.copy()
     display_df["match"] = display_df["home_team"] + " vs " + display_df["away_team"]
+    display_df["DS"] = display_df.apply(lambda row: recommendation_summary(row, "ds"), axis=1)
+    display_df["Best market"] = display_df.apply(lambda row: recommendation_summary(row, "best"), axis=1)
     display_df = display_df.rename(
         columns={
+            "kickoff_time_dk": "Kickoff DK",
             "model_home_prob": "Model H",
             "model_draw_prob": "Model U",
             "model_away_prob": "Model A",
@@ -345,32 +372,20 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
         display_df[column] = display_df[column].map(format_odds)
     for column in ["Stake DS", "Stake Best"]:
         display_df[column] = display_df[column].map(format_dkk)
-    return display_df[
-        [
-            "kickoff_time",
-            "group",
-            "matchday",
-            "match",
-            "Active H",
-            "Active U",
-            "Active A",
-            "Model H",
-            "Model U",
-            "Model A",
-            "DS H",
-            "DS U",
-            "DS A",
-            "Best H",
-            "Best U",
-            "Best A",
-            "DS rec",
-            "Best rec",
-            "Stake DS",
-            "Stake Best",
-            "Status",
-            "Draw context",
-        ]
+    columns = [
+        "Kickoff DK",
+        "group",
+        "matchday",
+        "match",
+        "Active H",
+        "Active U",
+        "Active A",
+        "DS",
+        "Best market",
+        "Status",
+        "Draw context",
     ]
+    return display_df[[column for column in columns if column in display_df.columns]]
 
 
 def show_sidebar() -> None:
@@ -420,26 +435,31 @@ def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
 
 
 def page_overview(df: pd.DataFrame) -> None:
-    st.title("VM 2026 Prediction & Kelly")
-    st.caption("Kommende kampe, odds, edge og anbefalet indsats")
+    st.markdown(
+        """
+        <div class="wc-hero-title">VM 2026 Prediction & Kelly</div>
+        <div class="wc-hero-subtitle">Kompakt betting-dashboard med aktive sandsynligheder, edge, Kelly og danske kickoff-tider.</div>
+        """,
+        unsafe_allow_html=True,
+    )
     counts = df["recommendation_status"].value_counts()
     kpi_cols = st.columns(6)
     with kpi_cols[0]:
-        metric_card("Current bankroll", format_dkk(load_bankroll_state()["current_bankroll"]))
+        st.metric("Bankroll", format_dkk(load_bankroll_state()["current_bankroll"]), help=TOOLTIPS["stake"])
     with kpi_cols[1]:
-        metric_card("Matches loaded", str(len(df)), st.session_state.active_data_mode.title())
+        st.metric("Kampe", str(len(df)), st.session_state.active_data_mode.title())
     with kpi_cols[2]:
-        metric_card("Playable at DS", str(counts.get("Playable at Danske Spil", 0)))
+        st.metric("Playable DS", str(counts.get("Playable at Danske Spil", 0)), help=TOOLTIPS["playable_ds"])
     with kpi_cols[3]:
-        metric_card("Better elsewhere", str(counts.get("Better elsewhere", 0)))
+        st.metric("Better elsewhere", str(counts.get("Better elsewhere", 0)), help=TOOLTIPS["better_elsewhere"])
     with kpi_cols[4]:
-        metric_card("No bet", str(counts.get("No bet", 0)))
+        st.metric("No bet", str(counts.get("No bet", 0)), help=TOOLTIPS["no_bet"])
     with kpi_cols[5]:
-        metric_card("High draw-context", str((df["draw_context_label"] == "High").sum()))
+        st.metric("High draw", str((df["draw_context_label"] == "High").sum()), help=TOOLTIPS["draw_context"])
     freshness = get_data_freshness(
         LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
     )
-    st.caption(f"Last updated: {freshness['last_modified'] or 'not available'} | Rows loaded: {len(df)}")
+    st.caption(f"Sidst opdateret: {freshness['last_modified'] or 'not available'} | Rækker: {len(df)}")
     if st.session_state.active_data_mode == "live":
         st.info(
             "Live mode currently uses market-implied probabilities as model probabilities. "
@@ -484,20 +504,24 @@ def page_overview(df: pd.DataFrame) -> None:
 
     for _, row in filtered.iterrows():
         with st.container(border=True):
-            cols = st.columns([2.2, 1.1, 1.1, 1.2, 1.2, 1.4])
-            cols[0].markdown(f"**{match_label(row)}**")
-            cols[0].caption(f"{row['kickoff_time']} | Group {row['group']} | Matchday {row['matchday']}")
-            cols[0].caption(
-                "Model: "
-                f"H {format_percentage(row.get('active_home_prob', row['model_home_prob']))} | "
-                f"U {format_percentage(row.get('active_draw_prob', row['model_draw_prob']))} | "
-                f"A {format_percentage(row.get('active_away_prob', row['model_away_prob']))}"
+            top_cols = st.columns([3.1, 1.2])
+            top_cols[0].markdown(f"**{match_label(row)}**")
+            top_cols[0].caption(
+                f"Kickoff: {row.get('kickoff_time_dk', row['kickoff_time'])} | Group {row['group']} | Matchday {row['matchday']}"
             )
-            cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
-            cols[2].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
-            cols[3].metric("DS", row["recommended_outcome_ds"], format_dkk(row["recommended_stake_ds"]))
-            cols[4].metric("Best", row["recommended_outcome_best"], format_dkk(row["recommended_stake_best"]))
-            if cols[5].button("Select match", key=f"select_{row['match_id']}"):
+            top_cols[0].caption(
+                "Active model: "
+                f"H {format_probability(row.get('active_home_prob', row['model_home_prob']))} · "
+                f"U {format_probability(row.get('active_draw_prob', row['model_draw_prob']))} · "
+                f"A {format_probability(row.get('active_away_prob', row['model_away_prob']))}"
+            )
+            top_cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
+            top_cols[1].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
+
+            rec_cols = st.columns([2.2, 2.4, 1])
+            rec_cols[0].caption(f"DS: {recommendation_summary(row, 'ds')}")
+            rec_cols[1].caption(f"Best: {recommendation_summary(row, 'best')}")
+            if rec_cols[2].button("Vælg kamp", key=f"select_{row['match_id']}"):
                 st.session_state.selected_match_id = row["match_id"]
                 st.session_state.page = "Match Detail"
                 st.rerun()
@@ -518,7 +542,7 @@ def page_overview(df: pd.DataFrame) -> None:
             )
 
     table_columns = [
-        "kickoff_time",
+        "kickoff_time_dk",
         "group",
         "matchday",
         "home_team",
@@ -536,8 +560,10 @@ def page_overview(df: pd.DataFrame) -> None:
         "best_draw_odds",
         "best_away_odds",
         "recommended_outcome_ds",
+        "recommended_odds_ds",
         "recommended_stake_ds",
         "recommended_outcome_best",
+        "recommended_odds_best",
         "recommended_bookmaker_best",
         "recommended_stake_best",
         "recommendation_status",
@@ -560,7 +586,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
 
     st.title(match_label(row))
     st.caption(
-        f"{row['kickoff_time']} | Group {row['group']} | Matchday {row['matchday']} | "
+        f"Kickoff: {row.get('kickoff_time_dk', row['kickoff_time'])} | Group {row['group']} | Matchday {row['matchday']} | "
         f"Data mode: {st.session_state.active_data_mode.title()} | "
         f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}"
     )
@@ -605,17 +631,17 @@ def page_match_detail(df: pd.DataFrame) -> None:
 
     c1, c2 = st.columns(2)
     with c1:
-        recommendation_card(
+        recommendation_card_v2(
             "Danske Spil",
-            row["recommended_outcome_ds"],
+            "Playable at Danske Spil" if row["recommended_outcome_ds"] != "No bet" else "No bet",
+            recommendation_outcome_label(row, "ds"),
             row["recommended_odds_ds"],
             "Danske Spil",
             row["recommended_edge_ds"],
             row["recommended_fractional_kelly_ds"],
             row["recommended_stake_ds"],
-            "Playable at Danske Spil" if row["recommended_outcome_ds"] != "No bet" else "No bet",
+            PROBABILITY_SOURCE_LABELS.get(row.get("active_probability_source", st.session_state.probability_source), row.get("active_probability_source", st.session_state.probability_source)),
         )
-        st.caption(f"Based on: {row.get('active_probability_source', st.session_state.probability_source)}")
         st.button(
             "Add Danske Spil recommendation to bet log",
             disabled=row["recommended_outcome_ds"] == "No bet",
@@ -623,17 +649,17 @@ def page_match_detail(df: pd.DataFrame) -> None:
             args=(row, "ds"),
         )
     with c2:
-        recommendation_card(
+        recommendation_card_v2(
             "Best market",
-            row["recommended_outcome_best"],
+            row["recommendation_status"] if row["recommended_outcome_best"] != "No bet" else "No bet",
+            recommendation_outcome_label(row, "best"),
             row["recommended_odds_best"],
             row["recommended_bookmaker_best"],
             row["recommended_edge_best"],
             row["recommended_fractional_kelly_best"],
             row["recommended_stake_best"],
-            row["recommendation_status"] if row["recommended_outcome_best"] != "No bet" else "No bet",
+            PROBABILITY_SOURCE_LABELS.get(row.get("active_probability_source", st.session_state.probability_source), row.get("active_probability_source", st.session_state.probability_source)),
         )
-        st.caption(f"Based on: {row.get('active_probability_source', st.session_state.probability_source)}")
         st.button(
             "Add Best Market recommendation to bet log",
             disabled=row["recommended_outcome_best"] == "No bet",
@@ -641,7 +667,13 @@ def page_match_detail(df: pd.DataFrame) -> None:
             args=(row, "best"),
         )
 
-    draw_context_card(row)
+    draw_context_card_v2(
+        row["draw_context_score"],
+        row["draw_context_label"],
+        row["mutual_draw_acceptance"],
+        row["both_teams_draw_satisfied"],
+        row["one_team_must_win"],
+    )
 
 
 def page_bankroll() -> None:

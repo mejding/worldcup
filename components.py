@@ -1,11 +1,30 @@
 import pandas as pd
 import streamlit as st
 
+from time_utils import format_danish_kickoff
+from tooltip_definitions import TOOLTIPS
+
 
 def format_percentage(value, decimals: int = 1) -> str:
     if pd.isna(value):
         return "-"
     return f"{float(value) * 100:.{decimals}f}%"
+
+
+def format_probability(value) -> str:
+    return format_percentage(value, decimals=1)
+
+
+def format_edge(value) -> str:
+    if pd.isna(value):
+        return "-"
+    return f"{float(value) * 100:+.1f}%"
+
+
+def format_kelly(value) -> str:
+    if pd.isna(value):
+        return "-"
+    return f"{float(value) * 100:.2f}%"
 
 
 def format_dkk(value) -> str:
@@ -18,6 +37,20 @@ def format_odds(value) -> str:
     if pd.isna(value):
         return "-"
     return f"{float(value):.2f}"
+
+
+def format_danish_datetime(value) -> str:
+    return format_danish_kickoff(value)
+
+
+def outcome_label(outcome, home_team: str, away_team: str, language: str = "en") -> str:
+    if outcome == "Home":
+        return f"{home_team} win" if language == "en" else f"{home_team} vinder"
+    if outcome == "Away":
+        return f"{away_team} win" if language == "en" else f"{away_team} vinder"
+    if outcome == "Draw":
+        return "Draw" if language == "en" else "Uafgjort"
+    return "No bet"
 
 
 def status_badge(status: str) -> str:
@@ -83,6 +116,48 @@ def recommendation_card(
         cols[3].metric("Stake", format_dkk(stake_dkk))
         if status == "Better elsewhere":
             st.caption("Value exists at best market odds, but not at Danske Spil.")
+
+
+def recommendation_card_v2(
+    title,
+    status,
+    outcome_label,
+    odds,
+    bookmaker,
+    edge,
+    kelly_pct,
+    stake_dkk,
+    probability_source,
+    reason=None,
+    compact=True,
+) -> None:
+    status_class = {
+        "Playable at Danske Spil": "wc-status-green",
+        "Better elsewhere": "wc-status-amber",
+        "No bet": "wc-status-muted",
+        "Playable": "wc-status-green",
+    }.get(status, "wc-status-muted")
+    status_text = "Playable" if status == "Playable at Danske Spil" else status
+    if outcome_label == "No bet" or pd.isna(outcome_label):
+        body = f"""
+        <div class="wc-card">
+          <div class="wc-line"><span class="wc-card-title">{title}</span><span class="{status_class}">{status_text}</span></div>
+          <div class="wc-rec-main">No bet</div>
+          <div class="wc-rec-details">{reason or TOOLTIPS['no_bet']}</div>
+          <div class="wc-muted">Based on: {probability_source}</div>
+        </div>
+        """
+    else:
+        bookmaker_text = f" · {bookmaker}" if bookmaker else ""
+        body = f"""
+        <div class="wc-card">
+          <div class="wc-line"><span class="wc-card-title">{title}</span><span class="{status_class}">{status_text}</span></div>
+          <div class="wc-rec-main">{outcome_label} @ {format_odds(odds)}{bookmaker_text}</div>
+          <div class="wc-rec-details">Edge {format_edge(edge)} · Kelly {format_kelly(kelly_pct)} · Stake {format_dkk(stake_dkk)}</div>
+          <div class="wc-muted">Based on: {probability_source}</div>
+        </div>
+        """
+    st.markdown(body, unsafe_allow_html=True)
 
 
 def metric_row(metrics: list[tuple[str, str]]) -> None:
@@ -237,3 +312,34 @@ def draw_context_card(row) -> None:
             "Draw-context is not a manual draw bonus. It is a contextual indicator that may later be used "
             "by the model to assess whether a draw is strategically acceptable for one or both teams."
         )
+
+
+def draw_context_card_v2(
+    score,
+    label,
+    mutual_draw_acceptance,
+    both_teams_draw_satisfied,
+    one_team_must_win,
+    compact=True,
+) -> None:
+    score = 0 if pd.isna(score) else int(score)
+    label = label if not pd.isna(label) else "Low"
+    if label == "High":
+        explanation = "High draw-context. Pay extra attention to draw probability and draw edge."
+    elif label == "Medium":
+        explanation = "Moderate draw-context. Draw may be contextually relevant, but the signal is not strong."
+    else:
+        explanation = "Low draw-context. Match context does not especially point toward a strategic draw."
+    with st.container(border=True):
+        c1, c2 = st.columns([1.1, 2.4])
+        c1.metric("Draw-context", f"{score}/100", label, help=TOOLTIPS["draw_context"])
+        c2.caption(explanation)
+        c2.caption("Draw-context is not draw probability and never triggers a bet alone.")
+        with st.expander("Draw-context details"):
+            st.write(
+                {
+                    "mutual_draw_acceptance": format_probability(mutual_draw_acceptance),
+                    "both_teams_draw_satisfied": bool(both_teams_draw_satisfied),
+                    "one_team_must_win": bool(one_team_must_win),
+                }
+            )

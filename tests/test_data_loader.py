@@ -48,7 +48,9 @@ def test_load_predictions(tmp_path):
     df = load_predictions(path)
 
     assert len(df) == 1
-    assert list(df.columns) == REQUIRED_PREDICTION_COLUMNS
+    assert list(df[REQUIRED_PREDICTION_COLUMNS].columns) == REQUIRED_PREDICTION_COLUMNS
+    assert df.loc[0, "kickoff_time"] == "2026-06-11T20:00:00Z"
+    assert df.loc[0, "kickoff_time_dk"] == "11. juni 2026, 22:00 dansk tid"
 
 
 def test_validate_required_columns():

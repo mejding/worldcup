@@ -64,6 +64,17 @@ streamlit run app.py
 
 The dashboard layout has been polished with KPI cards, cleaner recommendation cards, a more compact match overview, better bankroll and bet log sections, and a clearer draw-context visual indicator. Core model, odds, Kelly and recommendation logic are unchanged.
 
+## Sprint 10 Premium Dashboard UI
+
+Sprint 10 adds a compact premium dashboard layer without changing the core model, odds, Kelly, bankroll or bet settlement logic.
+
+- Overview cards now show active probabilities directly under each match.
+- Recommendations are displayed as compact betting lines with outcome, odds, bookmaker, edge, Kelly and stake.
+- Kickoff times are preserved as raw `kickoff_time` and displayed as derived `kickoff_time_dk` in `Europe/Copenhagen`.
+- Tooltips explain edge, Kelly, active probability source, recommendation statuses and draw-context fields.
+- Draw-context is shown as an explanatory signal only. It does not trigger bets by itself.
+- Streamlit theme settings and custom CSS make the app more readable on laptop-width screens.
+
 ## GitHub Setup
 
 1. Create a GitHub repository.
