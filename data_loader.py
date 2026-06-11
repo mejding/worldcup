@@ -20,6 +20,7 @@ from config import (
     ODDS_SNAPSHOT_PATH,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
+    REPORTS_DIR,
     REQUIRED_PREDICTION_COLUMNS,
     SAMPLE_PREDICTIONS_PATH,
 )
@@ -143,6 +144,7 @@ def ensure_runtime_data_files(
     data_dir.mkdir(parents=True, exist_ok=True)
     RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     pairs = runtime_file_pairs or RUNTIME_FILE_PAIRS
 
     for runtime_path, example_path in pairs.items():

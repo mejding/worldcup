@@ -1,16 +1,22 @@
 import pandas as pd
 import streamlit as st
 
+from backtest import run_walk_forward_backtest, run_world_cup_backtest
 from bankroll import load_bankroll_history, load_bankroll_state, reset_bankroll, update_bankroll
 from bet_log import add_bet, calculate_bet_summary, load_bet_log, reset_bet_settlement, settle_bet
 from charts import (
+    backtest_metric_by_fold_chart,
     bankroll_history_chart,
+    confidence_calibration_chart,
+    draw_calibration_chart,
     probability_comparison_chart,
     profit_loss_by_bookmaker_chart,
     profit_loss_by_outcome_chart,
     render_chart,
+    segment_metric_chart,
 )
 from components import (
+    calibration_gap_badge,
     draw_context_badge,
     draw_context_card,
     empty_state,
@@ -19,11 +25,19 @@ from components import (
     format_percentage,
     metric_card,
     metric_row,
+    model_metric_explanation,
     odds_comparison_table,
     recommendation_card,
+    small_sample_warning,
     status_badge,
 )
 from config import (
+    BACKTEST_BY_SEGMENT_PATH,
+    BACKTEST_CALIBRATION_BINS_PATH,
+    BACKTEST_DRAW_CALIBRATION_PATH,
+    BACKTEST_PREDICTIONS_PATH,
+    BACKTEST_REPORT_PATH,
+    BACKTEST_SUMMARY_PATH,
     DEFAULT_PROFILE_NAME,
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
@@ -39,6 +53,7 @@ from config import (
     PREFERRED_BOOKMAKER_NAMES,
     SAMPLE_PREDICTIONS_PATH,
     STAKING_PROFILES,
+    TRAINING_DATASET_PATH,
     get_staking_profile,
     get_secret_or_env,
     validate_staking_profile,
@@ -57,7 +72,7 @@ from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import build_live_predictions
-from model_registry import get_active_model_status
+from model_registry import get_active_model_status, get_latest_backtest_status
 from odds_utils import calculate_edge
 from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
@@ -285,10 +300,10 @@ def show_sidebar() -> None:
     st.sidebar.title("Navigation")
     st.session_state.page = st.sidebar.radio(
         "Side",
-        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Settings", "About"],
-        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Settings", "About"].index(
+        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"],
+        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"].index(
             st.session_state.page
-        ),
+        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"] else 0,
     )
     st.sidebar.divider()
     st.sidebar.markdown("**Bankroll**")
@@ -723,15 +738,155 @@ def page_analytics() -> None:
         empty_state("No draw bets logged yet.")
     else:
         st.dataframe(draw_bets, width="stretch", hide_index=True)
-    st.subheader("Coming later")
-    future_cols = st.columns(5)
-    for col, label in zip(
-        future_cols,
-        ["Accuracy", "Log loss", "Brier score", "Calibration", "Draw calibration"],
-    ):
+    st.subheader("Model backtest snapshot")
+    backtest_status = get_latest_backtest_status()
+    if not backtest_status["backtest_exists"]:
+        empty_state("No backtest results yet. Run a walk-forward backtest from Backtest & Metrics.")
+    else:
+        metric_row(
+            [
+                ("Accuracy", "-" if pd.isna(backtest_status["overall_accuracy"]) else format_percentage(backtest_status["overall_accuracy"])),
+                ("Log loss", "-" if pd.isna(backtest_status["overall_log_loss"]) else f"{backtest_status['overall_log_loss']:.3f}"),
+                ("Brier", "-" if pd.isna(backtest_status["overall_brier_score"]) else f"{backtest_status['overall_brier_score']:.3f}"),
+                ("ECE", "-" if pd.isna(backtest_status["overall_ece"]) else f"{backtest_status['overall_ece']:.3f}"),
+                ("Predictions", str(backtest_status["prediction_count"])),
+            ]
+        )
+
+
+def _load_optional_csv(path) -> pd.DataFrame:
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return pd.DataFrame()
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def page_backtest_metrics() -> None:
+    st.title("Backtest & Metrics")
+    st.caption("Time-based walk-forward evaluation for the historical model only.")
+    status = get_latest_backtest_status()
+    historical_exists = HISTORICAL_RESULTS_PATH.exists()
+    training_exists = TRAINING_DATASET_PATH.exists()
+    cols = st.columns(5)
+    with cols[0]:
+        metric_card("Historical data", "Yes" if historical_exists else "No")
+    with cols[1]:
+        metric_card("Training dataset", "Yes" if training_exists else "No")
+    with cols[2]:
+        metric_card("Backtest results", "Yes" if status["backtest_exists"] else "No")
+    with cols[3]:
+        metric_card("Predictions", str(status["prediction_count"]))
+    with cols[4]:
+        metric_card("Summary", "Yes" if status["summary_exists"] else "No")
+    st.caption(f"Last backtest file update: {status['last_modified'] or '-'}")
+
+    st.subheader("Run backtest")
+    c1, c2, c3, c4 = st.columns(4)
+    initial_train_end_date = c1.date_input("Initial train end date", value=pd.Timestamp("2014-01-01").date())
+    test_window = c2.text_input("Test window", value="365D")
+    step_size = c3.text_input("Step size", value="365D")
+    min_train_matches = c4.number_input("Min train matches", min_value=30, value=1000, step=100)
+    run_col, wc_col = st.columns(2)
+    with run_col:
+        if st.button("Run walk-forward backtest"):
+            if not historical_exists:
+                st.error("No historical data file found. Add data/historical/international_results.csv first.")
+            else:
+                try:
+                    raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                    warnings, errors = validate_historical_results(raw)
+                    for warning in warnings:
+                        st.warning(warning)
+                    if errors:
+                        for error in errors:
+                            st.error(error)
+                    else:
+                        standardized = standardize_historical_results(raw)
+                        with st.spinner("Running walk-forward backtest..."):
+                            result = run_walk_forward_backtest(
+                                standardized,
+                                initial_train_end_date=initial_train_end_date.isoformat(),
+                                test_window=test_window,
+                                step_size=step_size,
+                                min_train_matches=int(min_train_matches),
+                            )
+                        st.success(f"Backtest complete. Predictions: {len(result['predictions'])}")
+                        st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not run backtest: {exc}")
+    with wc_col:
+        if st.button("Run World Cup sanity check"):
+            if not historical_exists:
+                st.error("No historical data file found.")
+            else:
+                try:
+                    raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                    standardized = standardize_historical_results(raw)
+                    with st.spinner("Running World Cup sanity check..."):
+                        result = run_world_cup_backtest(standardized)
+                    st.success(f"World Cup check complete. Predictions: {len(result['predictions'])}")
+                    if result["predictions"].empty:
+                        st.warning("No World Cup predictions were created. This is expected if the historical file has too few World Cup rows.")
+                except Exception as exc:
+                    st.error(f"Could not run World Cup sanity check: {exc}")
+
+    predictions_df = _load_optional_csv(BACKTEST_PREDICTIONS_PATH)
+    summary_df = _load_optional_csv(BACKTEST_SUMMARY_PATH)
+    segment_df = _load_optional_csv(BACKTEST_BY_SEGMENT_PATH)
+    draw_df = _load_optional_csv(BACKTEST_DRAW_CALIBRATION_PATH)
+    calibration_df = _load_optional_csv(BACKTEST_CALIBRATION_BINS_PATH)
+    if predictions_df.empty:
+        empty_state("No backtest results yet.")
+        return
+
+    overall = segment_df[(segment_df["segment_name"] == "Overall") & (segment_df["segment_value"] == "All")].head(1)
+    overall_row = overall.iloc[0] if not overall.empty else pd.Series(dtype="object")
+    st.subheader("Overall KPI")
+    kpi_cols = st.columns(6)
+    kpi_values = [
+        ("Accuracy", format_percentage(overall_row.get("accuracy", 0))),
+        ("Log loss", f"{overall_row.get('log_loss', 0):.3f}"),
+        ("Brier score", f"{overall_row.get('brier_score', 0):.3f}"),
+        ("ECE", f"{overall_row.get('ece', 0):.3f}"),
+        ("Draw calibration gap", format_percentage(overall_row.get("draw_calibration_gap", 0), decimals=2)),
+        ("Matches", str(int(overall_row.get("match_count", len(predictions_df))))),
+    ]
+    for col, (label, value) in zip(kpi_cols, kpi_values):
         with col:
-            metric_card(label, "-", "After model backtest")
-    st.info("These metrics will become available after the historical model and backtest module are added.")
+            metric_card(label, value, model_metric_explanation(label))
+    small_sample_warning(int(overall_row.get("match_count", len(predictions_df))), threshold=100)
+    st.markdown(f"Draw gap badge: {calibration_gap_badge(overall_row.get('draw_calibration_gap', 0))}", unsafe_allow_html=True)
+
+    st.subheader("Fold performance")
+    metric = st.selectbox("Fold metric", ["accuracy", "log_loss", "brier_score", "ece"])
+    render_chart(backtest_metric_by_fold_chart(summary_df, metric))
+    st.dataframe(summary_df, width="stretch", hide_index=True)
+
+    st.subheader("Segment performance")
+    if segment_df.empty:
+        empty_state("No segment metrics available.")
+    else:
+        render_chart(segment_metric_chart(segment_df, "accuracy", "tournament_category"))
+        st.dataframe(segment_df, width="stretch", hide_index=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Draw calibration")
+        render_chart(draw_calibration_chart(draw_df))
+        st.dataframe(draw_df, width="stretch", hide_index=True)
+    with c2:
+        st.subheader("Confidence calibration")
+        render_chart(confidence_calibration_chart(calibration_df))
+        st.dataframe(calibration_df, width="stretch", hide_index=True)
+
+    st.subheader("Report")
+    if BACKTEST_REPORT_PATH.exists():
+        st.caption(str(BACKTEST_REPORT_PATH))
+        st.markdown(BACKTEST_REPORT_PATH.read_text())
+    else:
+        empty_state("No backtest report file yet.")
 
 
 def page_settings() -> None:
@@ -1002,6 +1157,8 @@ elif st.session_state.page == "Bet Log":
     page_bet_log()
 elif st.session_state.page == "Analytics":
     page_analytics()
+elif st.session_state.page == "Backtest & Metrics":
+    page_backtest_metrics()
 elif st.session_state.page == "Settings":
     page_settings()
 else:

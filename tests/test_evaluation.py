@@ -3,8 +3,10 @@ import pytest
 from evaluation import (
     calculate_accuracy,
     calculate_draw_calibration,
+    calculate_expected_calibration_error,
     calculate_log_loss,
     calculate_multiclass_brier_score,
+    calculate_prediction_metrics,
 )
 
 
@@ -28,3 +30,15 @@ def test_draw_calibration_buckets():
     assert "0.20-0.25" in df["bucket"].tolist()
     assert df["count"].sum() == 3
 
+
+def test_prediction_metrics_include_calibration_fields():
+    metrics = calculate_prediction_metrics(["H", "D"], [[0.8, 0.1, 0.1], [0.2, 0.6, 0.2]])
+
+    assert "ece" in metrics
+    assert "draw_calibration_gap" in metrics
+
+
+def test_expected_calibration_error_is_non_negative():
+    value = calculate_expected_calibration_error(["H"], [[0.8, 0.1, 0.1]])
+
+    assert value >= 0

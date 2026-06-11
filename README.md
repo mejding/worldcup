@@ -2,8 +2,6 @@
 
 Streamlit MVP for a World Cup 2026 prediction and Kelly staking workflow.
 
-The app uses sample data only. It is ready for local use and Streamlit Community Cloud testing, but it does not yet include live odds, live APIs, a historical ML model or backtesting.
-
 ## Project Overview
 
 - Core odds and edge calculations
@@ -13,13 +11,15 @@ The app uses sample data only. It is ready for local use and Streamlit Community
 - Local bankroll tracking
 - Bet log, settlement and double-settlement protection
 - Streamlit dashboard with sample World Cup 2026 group-stage data
+- Historical model training and time-based backtesting
 
 ## MVP Limitations
 
 - Sample mode uses `data/sample_predictions.csv`; live mode can generate `data/processed/live_predictions.csv` from odds API data.
 - In sample mode, model probabilities, Danske Spil odds and best market odds are sample inputs.
-- In live mode, model probabilities currently use market-implied probabilities until the historical model is added later.
+- In live mode, model probabilities can use market-implied probabilities or saved historical model predictions.
 - Draw-context is explanatory only in this MVP.
+- Backtesting evaluates model probability quality only. It does not evaluate historical betting P/L because historical odds are not included yet.
 - Bankroll and bet log are stored as local CSV/JSON files.
 - The tool is for analysis and tracking. It does not guarantee profit.
 
@@ -56,6 +56,7 @@ streamlit run app.py
 - Bankroll: current bankroll, bankroll history, manual updates and reset
 - Bet Log: bet table, manual bet entry, settlement and settlement reset
 - Analytics: bet-log summaries and simple breakdowns
+- Backtest & Metrics: walk-forward model evaluation, calibration tables, segments and report
 - Settings: Kelly profiles, manual staking overrides, preferred bookmaker and data mode
 - About: methodology, limitations, storage warning and health check
 
@@ -203,6 +204,38 @@ Metrics shown:
 - Predicted draw rate
 
 Market probabilities remain an important benchmark and are preserved in the app. Model probabilities replace only `model_home_prob`, `model_draw_prob` and `model_away_prob` when the historical model is selected and applied.
+
+## Backtesting and Metrics
+
+Sprint 7 adds time-based model backtesting. The backtest currently evaluates the historical model only. Market-aware ensemble will be added in a later sprint.
+
+The app uses walk-forward backtesting because football prediction is a chronological problem: a model should only train on matches that happened before the matches it predicts. A random split is not appropriate for reporting because it can mix future information into training, especially through team form, Elo and tournament context features.
+
+Run the backtest from the `Backtest & Metrics` page:
+
+1. Add historical data at `data/historical/international_results.csv`.
+2. Choose an initial train end date, test window, step size and minimum training matches.
+3. Click `Run walk-forward backtest`.
+4. Review the KPI cards, fold chart, segment table, draw calibration, confidence calibration and generated report.
+
+Backtest output files are written as runtime artifacts:
+
+- `data/processed/backtest_predictions.csv`
+- `data/processed/backtest_summary.csv`
+- `data/processed/backtest_by_segment.csv`
+- `data/processed/backtest_draw_calibration.csv`
+- `data/processed/backtest_calibration_bins.csv`
+- `data/reports/backtest_report.md`
+
+Metrics:
+
+- Accuracy: share of matches where the highest probability outcome matched the result.
+- Log loss: probability quality metric; lower is better.
+- Brier score: squared probability error; lower is better.
+- ECE: expected calibration error; lower is better.
+- Draw calibration gap: predicted draw rate minus actual draw rate. A positive value means the model overpredicts draws.
+
+The overall international backtest is the broadest and most stable view of model quality. The major tournament segment isolates World Cup, Euros, Copa América, AFCON, Asian Cup and Gold Cup-style matches inside the same walk-forward run. The World Cup-only sanity check trains before each selected World Cup year and tests only that tournament, but those samples are small and should not be treated as definitive evidence.
 
 ## Kelly Profiles
 

@@ -95,6 +95,34 @@ def empty_state(message: str) -> None:
     st.info(message)
 
 
+def small_sample_warning(match_count: int, threshold: int = 100) -> None:
+    if int(match_count or 0) < threshold:
+        st.warning(f"Small sample: {int(match_count or 0)} matches. Treat these metrics as directional only.")
+
+
+def calibration_gap_badge(gap) -> str:
+    if pd.isna(gap):
+        return "-"
+    gap = float(gap)
+    color = "#15803d" if abs(gap) < 0.03 else "#a16207" if abs(gap) < 0.08 else "#b91c1c"
+    label = f"{gap:+.1%}"
+    return (
+        f"<span style='background:{color}; color:white; padding:0.18rem 0.48rem; "
+        f"border-radius:0.35rem; font-size:0.8rem; font-weight:600'>{label}</span>"
+    )
+
+
+def model_metric_explanation(metric_name: str) -> str:
+    explanations = {
+        "Accuracy": "Share of matches where highest probability outcome matched result.",
+        "Log loss": "Probability quality metric; lower is better.",
+        "Brier score": "Squared probability error; lower is better.",
+        "ECE": "Calibration error; lower is better.",
+        "Draw calibration gap": "Predicted draw rate minus actual draw rate.",
+    }
+    return explanations.get(metric_name, "")
+
+
 def odds_comparison_table(row) -> pd.DataFrame:
     rows = []
     for key, label in [("home", "H"), ("draw", "U"), ("away", "A")]:

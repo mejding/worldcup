@@ -13,3 +13,4 @@ data/processed/*.csv
 data/historical/international_results.csv
 data/models/*.pkl
 data/models/*.json
+data/reports/*.md

@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from config import MODEL_METADATA_PATH, MODEL_PATH
+import pandas as pd
+
+from config import BACKTEST_BY_SEGMENT_PATH, BACKTEST_PREDICTIONS_PATH, BACKTEST_SUMMARY_PATH, MODEL_METADATA_PATH, MODEL_PATH
 
 
 def model_exists(model_path: Path = MODEL_PATH) -> bool:
@@ -30,3 +32,41 @@ def get_active_model_status() -> dict:
         "draw_rate_predicted": metrics.get("draw_rate_predicted"),
     }
 
+
+def get_latest_backtest_status() -> dict:
+    predictions_path = Path(BACKTEST_PREDICTIONS_PATH)
+    summary_path = Path(BACKTEST_SUMMARY_PATH)
+    segment_path = Path(BACKTEST_BY_SEGMENT_PATH)
+    status = {
+        "backtest_exists": predictions_path.exists(),
+        "last_modified": None,
+        "prediction_count": 0,
+        "summary_exists": summary_path.exists(),
+        "overall_accuracy": None,
+        "overall_log_loss": None,
+        "overall_brier_score": None,
+        "overall_ece": None,
+        "draw_calibration_gap": None,
+    }
+    if predictions_path.exists():
+        status["last_modified"] = predictions_path.stat().st_mtime
+        try:
+            status["prediction_count"] = len(pd.read_csv(predictions_path))
+        except Exception:
+            status["prediction_count"] = 0
+    if segment_path.exists():
+        try:
+            segments = pd.read_csv(segment_path)
+            overall = segments[
+                (segments["segment_name"] == "Overall") & (segments["segment_value"] == "All")
+            ].head(1)
+            if not overall.empty:
+                row = overall.iloc[0]
+                status["overall_accuracy"] = row.get("accuracy")
+                status["overall_log_loss"] = row.get("log_loss")
+                status["overall_brier_score"] = row.get("brier_score")
+                status["overall_ece"] = row.get("ece")
+                status["draw_calibration_gap"] = row.get("draw_calibration_gap")
+        except Exception:
+            pass
+    return status
