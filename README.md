@@ -62,7 +62,7 @@ streamlit run app.py
 
 ## End-to-End Flow
 
-1. Open `Overview` and scan upcoming matches, active probabilities, draw-context and recommendation status.
+1. Open `Overview` and scan upcoming matches, favorite, probabilities, draw-context and recommendation status.
 2. Select a match to open `Match Detail`.
 3. Compare market, model and active probabilities, then inspect Danske Spil and best-market recommendations separately.
 4. Add a recommended bet from Match Detail only if the card is not `No bet`.
@@ -80,6 +80,18 @@ streamlit run app.py
 Each recommendation uses `edge = active_probability * odds - 1`. Kelly stake is calculated from the current bankroll, not starting bankroll, because stake sizing should reflect the money currently available.
 
 The active probability source may be market, historical model, draw-context model or ensemble. If market/model/active percentages are identical, the app is likely using market fallback because model predictions have not been applied.
+
+## Pre-Trained Prediction Flow
+
+The app is designed so normal users do not need to train or apply models manually.
+
+- Bundled model artifacts live in `data/models/model.pkl`, `data/models/model_metadata.json` and `data/models/feature_columns.json`.
+- On startup, the app checks for model artifacts and automatically prepares upcoming-match predictions when possible.
+- The primary UI shows the decision, not the modelling machinery: favorite, probabilities, No bet/Playable/Better elsewhere, bookmaker and stake.
+- The app still uses the best validated probability source. A bundled model is not used blindly if market probabilities or an ensemble are configured as the better validated source.
+- If model files are missing or cannot be applied, the app falls back to market-implied probabilities and keeps the normal user flow working.
+
+Manual retraining, model application, backtests, draw-context analysis, ensemble comparison and odds refresh are admin/developer actions under `Admin / Settings`, `Backtest & Metrics`, `Draw Hypothesis` and `Ensemble`.
 
 ## Draw-Context
 

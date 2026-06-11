@@ -87,7 +87,7 @@ def apply_probability_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
         warnings.append("Unknown probability source. Falling back to market probabilities.")
 
     if not _columns_available(result, columns):
-        for fallback in ["market", "historical_model"]:
+        for fallback in ["historical_model", "market"]:
             fallback_columns = get_probability_columns(fallback)
             if _columns_available(result, fallback_columns):
                 columns = fallback_columns

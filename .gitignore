@@ -14,4 +14,7 @@ data/processed/*.json
 data/historical/international_results.csv
 data/models/*.pkl
 data/models/*.json
+!data/models/model.pkl
+!data/models/model_metadata.json
+!data/models/feature_columns.json
 data/reports/*.md

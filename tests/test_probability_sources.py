@@ -41,7 +41,7 @@ def test_active_probabilities_are_created():
 def test_unavailable_source_falls_back_to_market():
     result = apply_probability_source(_df(), "draw_context_model")
 
-    assert result.iloc[0]["active_probability_source"] == "market"
+    assert result.iloc[0]["active_probability_source"] == "historical_model"
     assert result.attrs["warnings"]
 
 

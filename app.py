@@ -73,6 +73,7 @@ from config import (
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
     LIVE_PREDICTIONS_WITH_MODEL_PATH,
+    MODEL_PATH,
     MODEL_PREDICTIONS_PATH,
     MODEL_SOURCE,
     ODDS_API_MARKET,
@@ -161,7 +162,66 @@ def current_profile() -> dict:
     return st.session_state.staking_profile.copy()
 
 
+def _empty_historical_results() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "date",
+            "home_team",
+            "away_team",
+            "home_score",
+            "away_score",
+            "result",
+            "tournament",
+            "neutral",
+        ]
+    )
+
+
+def prepare_best_available_predictions() -> list[str]:
+    messages = []
+    model_status = get_active_model_status()
+    if not model_status["model_exists"]:
+        st.session_state.model_source = "market_only"
+        messages.append("Pre-trained model unavailable. The app is using market-implied probabilities as a fallback.")
+        return messages
+
+    try:
+        base_df, base_warnings, actual_mode = load_predictions_by_mode(
+            st.session_state.data_mode,
+            model_source="market_only",
+        )
+        messages.extend(base_warnings)
+        output_path = LIVE_PREDICTIONS_WITH_MODEL_PATH if actual_mode == "live" else MODEL_PREDICTIONS_PATH
+        should_generate = not output_path.exists() or output_path.stat().st_size == 0
+        if not should_generate:
+            source_path = LIVE_PREDICTIONS_PATH if actual_mode == "live" else SAMPLE_PREDICTIONS_PATH
+            should_generate = output_path.stat().st_mtime < max(
+                source_path.stat().st_mtime if source_path.exists() else 0,
+                MODEL_PATH.stat().st_mtime,
+            )
+        if should_generate:
+            if HISTORICAL_RESULTS_PATH.exists():
+                raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                standardized = standardize_historical_results(raw)
+            else:
+                standardized = _empty_historical_results()
+            _, model_warnings = predict_upcoming_matches(
+                base_df,
+                standardized,
+                output_path=output_path,
+                include_draw_context_features=bool(model_status.get("include_draw_context_features", False)),
+            )
+            messages.extend(model_warnings)
+            messages.append("Model loaded. Predictions are being generated for upcoming matches.")
+        st.session_state.model_source = "historical_model_if_available"
+    except Exception as exc:
+        st.session_state.model_source = "market_only"
+        messages.append(f"Pre-trained model could not be applied. Using market-implied probabilities as fallback. Details: {exc}")
+    return messages
+
+
 def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
+    startup_messages = prepare_best_available_predictions()
     try:
         predictions, mode_warnings, actual_mode = load_predictions_by_mode(
             st.session_state.data_mode,
@@ -181,7 +241,7 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
         return pd.DataFrame(), [], ["Sample predictions file is empty or malformed."]
 
     warnings, errors = validate_predictions(predictions)
-    warnings = mode_warnings + warnings
+    warnings = startup_messages + mode_warnings + warnings
     if errors:
         return predictions, warnings, errors
     if ENSEMBLE_PREDICTIONS_PATH.exists() and ENSEMBLE_PREDICTIONS_PATH.stat().st_size > 0:
@@ -290,6 +350,31 @@ def probability_source_label(row) -> str:
     if source == "ensemble" and not pd.isna(row.get("ensemble_w_market")):
         return f"{label} {float(row.get('ensemble_w_market')):.0%}/{float(row.get('ensemble_w_model')):.0%}"
     return label
+
+
+def match_prediction_summary(row) -> dict:
+    probabilities = {
+        row["home_team"]: probability_for_outcome(row, "home"),
+        "Draw": probability_for_outcome(row, "draw"),
+        row["away_team"]: probability_for_outcome(row, "away"),
+    }
+    favorite = max(probabilities, key=probabilities.get)
+    return {
+        "favorite": favorite,
+        "line": (
+            f"{row['home_team']} {format_probability(probabilities[row['home_team']])} · "
+            f"Draw {format_probability(probabilities['Draw'])} · "
+            f"{row['away_team']} {format_probability(probabilities[row['away_team']])}"
+        ),
+    }
+
+
+def betting_decision_summary(row) -> str:
+    if row["recommendation_status"] == "No bet":
+        return "No bet"
+    if row["recommended_outcome_ds"] != "No bet":
+        return f"{recommendation_outcome_label(row, 'ds')} · {format_dkk(row['recommended_stake_ds'])}"
+    return f"{recommendation_outcome_label(row, 'best')} · {format_dkk(row['recommended_stake_best'])}"
 
 
 def format_bet_log_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -516,13 +601,25 @@ def show_sidebar() -> None:
     state = load_bankroll_state()
     net = state["current_bankroll"] - state["starting_bankroll"]
     ret = net / state["starting_bankroll"] if state["starting_bankroll"] else 0
+    pages = [
+        "Overview",
+        "Match Detail",
+        "Bet Log",
+        "Bankroll",
+        "Analytics",
+        "About",
+        "Admin / Settings",
+        "Backtest & Metrics",
+        "Draw Hypothesis",
+        "Ensemble",
+    ]
+    if st.session_state.page == "Settings":
+        st.session_state.page = "Admin / Settings"
     st.sidebar.title("Navigation")
     st.session_state.page = st.sidebar.radio(
         "Side",
-        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"],
-        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"].index(
-            st.session_state.page
-        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"] else 0,
+        pages,
+        index=pages.index(st.session_state.page) if st.session_state.page in pages else 0,
     )
     st.sidebar.divider()
     st.sidebar.markdown("**Bankroll**")
@@ -541,17 +638,20 @@ def show_sidebar() -> None:
     mode_path = LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
     freshness = get_data_freshness(mode_path)
     st.sidebar.caption(f"Mode: {st.session_state.active_data_mode.title()}")
-    st.sidebar.caption(f"Model: {st.session_state.active_model_source.replace('_', ' ').title()}")
+    st.sidebar.caption(f"Prediction source: {PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)}")
     st.sidebar.caption(f"Rows: {freshness['row_count']}")
     st.sidebar.caption(f"Updated: {freshness['last_modified'] or '-'}")
-    st.sidebar.caption(f"Kelly source: {PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)}")
     if st.session_state.active_data_mode == "live":
         st.sidebar.caption(f"API key: {'configured' if get_secret_or_env('ODDS_API_KEY') else 'missing'}")
 
 
 def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
     for warning in warnings:
-        st.warning(warning)
+        text = str(warning)
+        if "fallback" in text.lower() or "market probabilities" in text.lower() or "market-implied" in text.lower():
+            st.info(text)
+        else:
+            st.warning(text)
     for error in errors:
         st.error(error)
     if errors:
@@ -562,7 +662,7 @@ def page_overview(df: pd.DataFrame) -> None:
     st.markdown(
         """
         <div class="wc-hero-title">VM 2026 Prediction & Kelly</div>
-        <div class="wc-hero-subtitle">Kompakt betting-dashboard med aktive sandsynligheder, edge, Kelly og danske kickoff-tider.</div>
+        <div class="wc-hero-subtitle">Se favorit, sandsynligheder, betting decision og anbefalet stake for kommende VM-kampe.</div>
         """,
         unsafe_allow_html=True,
     )
@@ -586,12 +686,11 @@ def page_overview(df: pd.DataFrame) -> None:
     st.caption(f"Sidst opdateret: {freshness['last_modified'] or 'not available'} | Rækker: {len(df)}")
     if st.session_state.active_data_mode == "live":
         st.info(
-            "Live mode currently uses market-implied probabilities as model probabilities. "
-            "Historical ML model probabilities will be added later."
+            "Live mode uses fetched odds and the best available prediction source. If model predictions cannot be generated, market probabilities are used as fallback."
         )
-    st.caption(f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}")
+    active_source = df["active_probability_source"].iloc[0] if "active_probability_source" in df.columns and not df.empty else st.session_state.probability_source
     st.markdown(
-        f"Kelly probability source: {probability_source_badge(df['active_probability_source'].iloc[0] if 'active_probability_source' in df.columns and not df.empty else st.session_state.probability_source)}",
+        f"Prediction source: {probability_source_badge('best_validated' if st.session_state.probability_source == 'best_validated' else active_source)}",
         unsafe_allow_html=True,
     )
 
@@ -628,23 +727,19 @@ def page_overview(df: pd.DataFrame) -> None:
 
     for _, row in filtered.iterrows():
         with st.container(border=True):
+            prediction = match_prediction_summary(row)
             top_cols = st.columns([3.1, 1.2])
             top_cols[0].markdown(f"**{match_label(row)}**")
             top_cols[0].caption(
                 f"Kickoff: {row.get('kickoff_time_dk', row['kickoff_time'])} | Group {row['group']} | Matchday {row['matchday']}"
             )
-            top_cols[0].caption(
-                "Active model: "
-                f"H {format_probability(row.get('active_home_prob', row['model_home_prob']))} · "
-                f"U {format_probability(row.get('active_draw_prob', row['model_draw_prob']))} · "
-                f"A {format_probability(row.get('active_away_prob', row['model_away_prob']))}"
-            )
+            top_cols[0].caption(f"Favorite: {prediction['favorite']} | {prediction['line']}")
             top_cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
             top_cols[1].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
 
             rec_cols = st.columns([2.2, 2.4, 1])
-            rec_cols[0].caption(f"DS: {recommendation_summary(row, 'ds')}")
-            rec_cols[1].caption(f"Best: {recommendation_summary(row, 'best')}")
+            rec_cols[0].caption(f"Decision: {betting_decision_summary(row)}")
+            rec_cols[1].caption(f"Bookmaker/value: DS {recommendation_summary(row, 'ds')} | Best {recommendation_summary(row, 'best')}")
             if row["recommendation_status"] == "No bet":
                 rec_cols[0].caption(f"Reason: {no_bet_reason(row, 'best')}")
             elif row["recommended_outcome_ds"] == "No bet":
@@ -1430,7 +1525,10 @@ def page_ensemble(df: pd.DataFrame) -> None:
 
 
 def page_settings() -> None:
-    st.title("Settings")
+    st.title("Admin / Settings")
+    st.info(
+        "Normal users do not need this page. The app automatically uses the best available predictions and falls back to market probabilities when model files are unavailable."
+    )
     st.subheader("Data mode")
     selected_mode_label = st.radio(
         "Choose data source",
@@ -1734,7 +1832,7 @@ elif st.session_state.page == "Draw Hypothesis":
     page_draw_hypothesis(df)
 elif st.session_state.page == "Ensemble":
     page_ensemble(df)
-elif st.session_state.page == "Settings":
+elif st.session_state.page == "Admin / Settings":
     page_settings()
 else:
     page_about(df)

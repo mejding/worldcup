@@ -11,12 +11,12 @@ from draw_hypothesis import recommend_draw_context_usage
 from ensemble_backtest import select_best_probability_source
 
 
-def model_exists(model_path: Path = MODEL_PATH) -> bool:
-    return Path(model_path).exists()
+def model_exists(model_path: Path = None) -> bool:
+    return Path(model_path or MODEL_PATH).exists()
 
 
-def load_model_metadata(path: Path = MODEL_METADATA_PATH) -> dict:
-    path = Path(path)
+def load_model_metadata(path: Path = None) -> dict:
+    path = Path(path or MODEL_METADATA_PATH)
     if not path.exists():
         return {}
     return json.loads(path.read_text())
@@ -35,6 +35,7 @@ def get_active_model_status() -> dict:
         "brier_score": metrics.get("brier_score"),
         "draw_rate_actual": metrics.get("draw_rate_actual"),
         "draw_rate_predicted": metrics.get("draw_rate_predicted"),
+        "include_draw_context_features": metadata.get("include_draw_context_features", False),
     }
 
 
