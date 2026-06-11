@@ -275,6 +275,51 @@ Output files:
 
 Draw-context features are included only when the user enables them for future training/apply-model runs. The app does not automatically switch the production model based on one comparison run.
 
+## Market-Aware Ensemble
+
+Sprint 9 adds a probability-source layer and a market-aware ensemble. Market probabilities matter because bookmaker markets are strong baselines. A model-only probability set may add context, but it should not be assumed to beat the market.
+
+The ensemble combines probabilities like this:
+
+```text
+final_home_prob = 0.8 * market_home_prob + 0.2 * model_home_prob
+```
+
+The same formula is applied to home, draw and away probabilities, then normalized so they sum to 1.0.
+
+Supported probability sources:
+
+- Market only
+- Historical model
+- Draw-context model
+- Market-aware ensemble
+- Best validated source
+
+The active probability source controls only the probabilities used for edge and Kelly. The app never changes bookmaker odds. Edge remains:
+
+```text
+active_probability * odds - 1
+```
+
+Ensemble weights can be tested from 100% market / 0% model through 0% market / 100% model. Selection prioritizes log loss, then Brier score, ECE and draw calibration. Accuracy is shown but is not the primary selection metric because probability quality matters more for staking.
+
+Run ensemble work from the `Ensemble` page:
+
+1. `Run ensemble comparison` evaluates saved backtest predictions if historical market probabilities are available.
+2. `Use recommended probability source` saves the best validated source.
+3. `Apply manual ensemble to current matches` creates `data/processed/ensemble_predictions.csv` for upcoming matches.
+
+Output files:
+
+- `data/processed/ensemble_comparison.csv`
+- `data/processed/ensemble_predictions.csv`
+- `data/processed/ensemble_backtest_summary.csv`
+- `data/processed/ensemble_backtest_by_segment.csv`
+- `data/processed/active_probability_source.json`
+- `data/reports/ensemble_report.md`
+
+If historical market probabilities are unavailable, the app will say so and will not pretend the ensemble has been fully validated. Current-match ensemble probabilities can still be created from live/sample market probabilities, but should be treated as experimental until validated.
+
 ## Kelly Profiles
 
 The default profile is Standard:

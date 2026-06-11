@@ -160,6 +160,47 @@ def draw_calibration_comparison_chart(baseline_df: pd.DataFrame, draw_context_df
     return fig
 
 
+def ensemble_weight_metric_chart(comparison_df: pd.DataFrame, metric: str):
+    if comparison_df.empty or metric not in comparison_df.columns or "w_market" not in comparison_df.columns:
+        return None
+    chart_df = comparison_df[comparison_df["source_name"].astype(str).str.startswith("ensemble")].copy()
+    if chart_df.empty:
+        return None
+    fig = px.line(chart_df.sort_values("w_market"), x="w_market", y=metric, markers=True)
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Market weight", yaxis_title=metric)
+    return fig
+
+
+def probability_source_comparison_chart(comparison_df: pd.DataFrame):
+    if comparison_df.empty or "log_loss" not in comparison_df.columns:
+        return None
+    chart_df = comparison_df.copy()
+    fig = px.bar(chart_df, x="source_name", y="log_loss", color="source_name", text_auto=".3f")
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="", showlegend=False)
+    return fig
+
+
+def active_vs_market_model_chart(match_row):
+    sources = [
+        ("Market", "market"),
+        ("Historical model", "model"),
+        ("Draw-context model", "draw_model"),
+        ("Ensemble", "ensemble"),
+        ("Active", "active"),
+    ]
+    rows = []
+    for label, prefix in sources:
+        columns = [f"{prefix}_home_prob", f"{prefix}_draw_prob", f"{prefix}_away_prob"]
+        if all(column in match_row.index and not pd.isna(match_row[column]) for column in columns):
+            for outcome, column in zip(["Home", "Draw", "Away"], columns):
+                rows.append({"Source": label, "Outcome": outcome, "Probability": float(match_row[column])})
+    if not rows:
+        return None
+    fig = px.bar(pd.DataFrame(rows), x="Outcome", y="Probability", color="Source", barmode="group", text_auto=".1%")
+    fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10), yaxis_tickformat=".0%")
+    return fig
+
+
 def render_chart(fig) -> None:
     if fig is None:
         st.info("Ingen data at vise endnu.")

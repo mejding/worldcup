@@ -5,6 +5,7 @@ from backtest import compare_baseline_vs_draw_context_model, run_walk_forward_ba
 from bankroll import load_bankroll_history, load_bankroll_state, reset_bankroll, update_bankroll
 from bet_log import add_bet, calculate_bet_summary, load_bet_log, reset_bet_settlement, settle_bet
 from charts import (
+    active_vs_market_model_chart,
     backtest_metric_by_fold_chart,
     bankroll_history_chart,
     confidence_calibration_chart,
@@ -12,13 +13,16 @@ from charts import (
     draw_context_score_distribution_chart,
     draw_feature_comparison_chart,
     draw_rate_by_segment_chart,
+    ensemble_weight_metric_chart,
     probability_comparison_chart,
+    probability_source_comparison_chart,
     profit_loss_by_bookmaker_chart,
     profit_loss_by_outcome_chart,
     render_chart,
     segment_metric_chart,
 )
 from components import (
+    best_source_card,
     calibration_gap_badge,
     draw_context_badge,
     draw_context_card,
@@ -26,19 +30,23 @@ from components import (
     draw_context_score_badge,
     draw_hypothesis_summary_card,
     empty_state,
+    ensemble_weight_badge,
     format_dkk,
     format_odds,
     format_percentage,
     metric_card,
+    metric_improvement_badge,
     metric_row,
     model_metric_explanation,
     odds_comparison_table,
     recommendation_card,
+    probability_source_badge,
     small_sample_caveat,
     small_sample_warning,
     status_badge,
 )
 from backtest_paths import (
+    ACTIVE_PROBABILITY_SOURCE_PATH,
     BACKTEST_BY_SEGMENT_PATH,
     BACKTEST_CALIBRATION_BINS_PATH,
     BACKTEST_DRAW_CALIBRATION_PATH,
@@ -51,9 +59,15 @@ from backtest_paths import (
     DRAW_HYPOTHESIS_BY_SEGMENT_PATH,
     DRAW_HYPOTHESIS_REPORT_PATH,
     DRAW_HYPOTHESIS_SUMMARY_PATH,
+    ENSEMBLE_COMPARISON_PATH,
+    ENSEMBLE_PREDICTIONS_PATH,
+    ENSEMBLE_REPORT_PATH,
+    PROCESSED_DATA_DIR,
 )
 from config import (
+    DEFAULT_ENSEMBLE_W_MARKET,
     DEFAULT_PROFILE_NAME,
+    DEFAULT_PROBABILITY_SOURCE,
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
     LIVE_PREDICTIONS_WITH_MODEL_PATH,
@@ -83,6 +97,8 @@ from data_loader import (
 )
 from draw_features import add_draw_context_features
 from draw_hypothesis import run_draw_hypothesis_analysis
+from ensemble import apply_ensemble_to_upcoming_matches
+from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
 from fetch_fixtures import fetch_worldcup_fixtures
 from fetch_odds import append_odds_snapshot, fetch_odds_from_api
 from features import build_training_dataset
@@ -91,6 +107,12 @@ from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import build_live_predictions
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status
 from odds_utils import calculate_edge
+from probability_sources import (
+    PROBABILITY_SOURCE_LABELS,
+    apply_probability_source,
+    load_active_probability_source,
+    save_active_probability_source,
+)
 from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
 from train_model import train_historical_model
@@ -121,6 +143,12 @@ def init_session_state() -> None:
         st.session_state.active_model_source = "market_only"
     if "use_draw_context_features" not in st.session_state:
         st.session_state.use_draw_context_features = False
+    if "probability_source" not in st.session_state:
+        st.session_state.probability_source = DEFAULT_PROBABILITY_SOURCE
+    if "ensemble_w_market" not in st.session_state:
+        st.session_state.ensemble_w_market = DEFAULT_ENSEMBLE_W_MARKET
+    if "ensemble_model_variant" not in st.session_state:
+        st.session_state.ensemble_model_variant = "historical_model"
 
 
 def current_profile() -> dict:
@@ -149,12 +177,38 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
     warnings = mode_warnings + warnings
     if errors:
         return predictions, warnings, errors
+    if ENSEMBLE_PREDICTIONS_PATH.exists() and ENSEMBLE_PREDICTIONS_PATH.stat().st_size > 0:
+        try:
+            ensemble_df = pd.read_csv(ENSEMBLE_PREDICTIONS_PATH)
+            ensemble_columns = [
+                "match_id",
+                "ensemble_home_prob",
+                "ensemble_draw_prob",
+                "ensemble_away_prob",
+                "ensemble_w_market",
+                "ensemble_w_model",
+            ]
+            if set(ensemble_columns).issubset(ensemble_df.columns):
+                predictions = predictions.drop(
+                    columns=[column for column in ensemble_columns[1:] if column in predictions.columns],
+                    errors="ignore",
+                ).merge(ensemble_df[ensemble_columns], on="match_id", how="left")
+        except Exception:
+            warnings.append("Could not load saved ensemble predictions.")
+    try:
+        predictions = apply_probability_source(predictions, st.session_state.probability_source)
+        warnings.extend(predictions.attrs.get("warnings", []))
+    except ValueError as exc:
+        return predictions, warnings, [str(exc)]
     bankroll = load_bankroll_state()["current_bankroll"]
     enriched = add_recommendations(predictions, bankroll, current_profile())
     return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors
 
 
 def probability_for_outcome(row, outcome: str) -> float:
+    active_column = f"active_{outcome.lower()}_prob"
+    if active_column in row.index:
+        return float(row[active_column])
     return float(row[f"model_{outcome.lower()}_prob"])
 
 
@@ -198,7 +252,7 @@ def outcome_kelly_table(row) -> pd.DataFrame:
     profile = current_profile()
     bankroll = load_bankroll_state()["current_bankroll"]
     for outcome_key, outcome_name in [("home", "Home"), ("draw", "Draw"), ("away", "Away")]:
-        model_probability = float(row[f"model_{outcome_key}_prob"])
+        model_probability = float(row.get(f"active_{outcome_key}_prob", row[f"model_{outcome_key}_prob"]))
         ds_odds = float(row[f"ds_{outcome_key}_odds"])
         best_odds = float(row[f"best_{outcome_key}_odds"])
         ds_kelly = calculate_final_stake_fraction(
@@ -267,6 +321,9 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
             "model_home_prob": "Model H",
             "model_draw_prob": "Model U",
             "model_away_prob": "Model A",
+            "active_home_prob": "Active H",
+            "active_draw_prob": "Active U",
+            "active_away_prob": "Active A",
             "ds_home_odds": "DS H",
             "ds_draw_odds": "DS U",
             "ds_away_odds": "DS A",
@@ -281,8 +338,9 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
             "draw_context_label": "Draw context",
         }
     )
-    for column in ["Model H", "Model U", "Model A"]:
-        display_df[column] = display_df[column].map(format_percentage)
+    for column in ["Active H", "Active U", "Active A", "Model H", "Model U", "Model A"]:
+        if column in display_df.columns:
+            display_df[column] = display_df[column].map(format_percentage)
     for column in ["DS H", "DS U", "DS A", "Best H", "Best U", "Best A"]:
         display_df[column] = display_df[column].map(format_odds)
     for column in ["Stake DS", "Stake Best"]:
@@ -293,6 +351,9 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
             "group",
             "matchday",
             "match",
+            "Active H",
+            "Active U",
+            "Active A",
             "Model H",
             "Model U",
             "Model A",
@@ -319,10 +380,10 @@ def show_sidebar() -> None:
     st.sidebar.title("Navigation")
     st.session_state.page = st.sidebar.radio(
         "Side",
-        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"],
-        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"].index(
+        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"],
+        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"].index(
             st.session_state.page
-        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"] else 0,
+        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Ensemble", "Settings", "About"] else 0,
     )
     st.sidebar.divider()
     st.sidebar.markdown("**Bankroll**")
@@ -344,6 +405,7 @@ def show_sidebar() -> None:
     st.sidebar.caption(f"Model: {st.session_state.active_model_source.replace('_', ' ').title()}")
     st.sidebar.caption(f"Rows: {freshness['row_count']}")
     st.sidebar.caption(f"Updated: {freshness['last_modified'] or '-'}")
+    st.sidebar.caption(f"Kelly source: {PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)}")
     if st.session_state.active_data_mode == "live":
         st.sidebar.caption(f"API key: {'configured' if get_secret_or_env('ODDS_API_KEY') else 'missing'}")
 
@@ -384,6 +446,10 @@ def page_overview(df: pd.DataFrame) -> None:
             "Historical ML model probabilities will be added later."
         )
     st.caption(f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}")
+    st.markdown(
+        f"Kelly probability source: {probability_source_badge(df['active_probability_source'].iloc[0] if 'active_probability_source' in df.columns and not df.empty else st.session_state.probability_source)}",
+        unsafe_allow_html=True,
+    )
 
     with st.expander("Filtre", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
@@ -423,9 +489,9 @@ def page_overview(df: pd.DataFrame) -> None:
             cols[0].caption(f"{row['kickoff_time']} | Group {row['group']} | Matchday {row['matchday']}")
             cols[0].caption(
                 "Model: "
-                f"H {format_percentage(row['model_home_prob'])} | "
-                f"U {format_percentage(row['model_draw_prob'])} | "
-                f"A {format_percentage(row['model_away_prob'])}"
+                f"H {format_percentage(row.get('active_home_prob', row['model_home_prob']))} | "
+                f"U {format_percentage(row.get('active_draw_prob', row['model_draw_prob']))} | "
+                f"A {format_percentage(row.get('active_away_prob', row['model_away_prob']))}"
             )
             cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
             cols[2].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
@@ -457,6 +523,9 @@ def page_overview(df: pd.DataFrame) -> None:
         "matchday",
         "home_team",
         "away_team",
+        "active_home_prob",
+        "active_draw_prob",
+        "active_away_prob",
         "model_home_prob",
         "model_draw_prob",
         "model_away_prob",
@@ -509,17 +578,24 @@ def page_match_detail(df: pd.DataFrame) -> None:
             "Outcome": ["Home", "Draw", "Away"],
             "Model": [row["model_home_prob"], row["model_draw_prob"], row["model_away_prob"]],
             "Market": [row["market_home_prob"], row["market_draw_prob"], row["market_away_prob"]],
+            "Active": [
+                row.get("active_home_prob", row["model_home_prob"]),
+                row.get("active_draw_prob", row["model_draw_prob"]),
+                row.get("active_away_prob", row["model_away_prob"]),
+            ],
         }
     )
+    if "ensemble_home_prob" in row.index:
+        prob_df["Ensemble"] = [row.get("ensemble_home_prob"), row.get("ensemble_draw_prob"), row.get("ensemble_away_prob")]
     c1, c2 = st.columns([1, 1.2])
     c1.subheader("Probability comparison")
-    c1.caption("Market probabilities are derived from bookmaker odds. Model probabilities use the selected model source.")
+    c1.caption(f"Active Kelly source: {row.get('active_probability_source', st.session_state.probability_source)}")
     c1.dataframe(
-        prob_df.style.format({"Model": "{:.1%}", "Market": "{:.1%}"}),
+        prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
         width="stretch",
         hide_index=True,
     )
-    c2.plotly_chart(probability_comparison_chart(row), width="stretch")
+    c2.plotly_chart(active_vs_market_model_chart(row), width="stretch")
 
     st.subheader("Odds comparison")
     st.dataframe(odds_comparison_table(row), width="stretch", hide_index=True)
@@ -539,6 +615,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_stake_ds"],
             "Playable at Danske Spil" if row["recommended_outcome_ds"] != "No bet" else "No bet",
         )
+        st.caption(f"Based on: {row.get('active_probability_source', st.session_state.probability_source)}")
         st.button(
             "Add Danske Spil recommendation to bet log",
             disabled=row["recommended_outcome_ds"] == "No bet",
@@ -556,6 +633,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_stake_best"],
             row["recommendation_status"] if row["recommended_outcome_best"] != "No bet" else "No bet",
         )
+        st.caption(f"Based on: {row.get('active_probability_source', st.session_state.probability_source)}")
         st.button(
             "Add Best Market recommendation to bet log",
             disabled=row["recommended_outcome_best"] == "No bet",
@@ -1074,6 +1152,106 @@ def page_draw_hypothesis(df: pd.DataFrame) -> None:
         st.markdown(DRAW_HYPOTHESIS_REPORT_PATH.read_text())
 
 
+def page_ensemble(df: pd.DataFrame) -> None:
+    st.title("Ensemble")
+    st.write(
+        "The ensemble combines market probabilities with model probabilities. Bookmaker markets are strong baselines, "
+        "while the model may add small contextual edges."
+    )
+    st.warning(
+        "Do not use ensemble weights blindly. If historical market probabilities are unavailable, the ensemble cannot "
+        "be fully validated and should be treated as experimental."
+    )
+
+    active_config = load_active_probability_source()
+    comparison_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Market probs", "Yes" if {"market_home_prob", "market_draw_prob", "market_away_prob"}.issubset(df.columns) else "No")
+    c2.metric("Historical model", "Yes" if {"model_home_prob", "model_draw_prob", "model_away_prob"}.issubset(df.columns) else "No")
+    c3.metric("Draw-context model", "Yes" if {"draw_model_home_prob", "draw_model_draw_prob", "draw_model_away_prob"}.issubset(df.columns) else "No")
+    c4.metric("Backtest predictions", "Yes" if BACKTEST_PREDICTIONS_PATH.exists() else "No")
+    historical_market = False
+    if BACKTEST_PREDICTIONS_PATH.exists() and BACKTEST_PREDICTIONS_PATH.stat().st_size > 0:
+        try:
+            historical_market = {"market_home_prob", "market_draw_prob", "market_away_prob"}.issubset(pd.read_csv(BACKTEST_PREDICTIONS_PATH, nrows=1).columns)
+        except Exception:
+            historical_market = False
+    c5.metric("Historical market probs", "Yes" if historical_market else "No")
+
+    st.subheader("Current active probability source")
+    cols = st.columns(4)
+    cols[0].markdown(probability_source_badge(active_config.get("resolved_source", "market")), unsafe_allow_html=True)
+    cols[1].metric("Market weight", format_percentage(active_config.get("w_market", 1.0)))
+    cols[2].metric("Model weight", format_percentage(active_config.get("w_model", 0.0)))
+    cols[3].caption(active_config.get("reason", "-"))
+
+    st.subheader("Run ensemble comparison")
+    if st.button("Run ensemble comparison"):
+        result = run_ensemble_backtest_from_saved_predictions(BACKTEST_PREDICTIONS_PATH, PROCESSED_DATA_DIR)
+        if result["status"] == "market_probabilities_missing":
+            st.warning("Historical market probabilities are unavailable. Ensemble backtest cannot be fully evaluated against market. Use live/current ensemble only or add historical odds data later.")
+        elif result["status"] != "ok":
+            st.warning(f"Comparison status: {result['status']}")
+        else:
+            st.success("Ensemble comparison complete.")
+        st.rerun()
+
+    if comparison_df.empty:
+        empty_state("No ensemble comparison results yet.")
+    else:
+        recommendation = select_best_probability_source(comparison_df)
+        best_source_card(recommendation)
+        if st.button("Use recommended probability source"):
+            save_active_probability_source(
+                {
+                    "source": "best_validated",
+                    "resolved_source": recommendation["recommended_source"],
+                    "w_market": recommendation["w_market"],
+                    "w_model": recommendation["w_model"],
+                    "reason": recommendation["reason"],
+                    "last_validated_at": pd.Timestamp.utcnow().isoformat(),
+                }
+            )
+            st.session_state.probability_source = "best_validated"
+            st.success("Recommended probability source saved.")
+            st.rerun()
+        metric = st.selectbox("Ensemble metric", ["log_loss", "brier_score", "ece", "draw_calibration_gap"])
+        render_chart(ensemble_weight_metric_chart(comparison_df, metric))
+        render_chart(probability_source_comparison_chart(comparison_df))
+        st.dataframe(comparison_df, width="stretch", hide_index=True)
+
+    st.subheader("Manual ensemble weights")
+    w_market = st.slider("Market weight", min_value=0.0, max_value=1.0, value=float(st.session_state.ensemble_w_market), step=0.05)
+    model_variant = st.selectbox("Model variant", ["historical_model", "draw_context_model"], index=0 if st.session_state.ensemble_model_variant == "historical_model" else 1)
+    st.caption(ensemble_weight_badge(w_market, 1 - w_market))
+    if st.button("Apply manual ensemble to current matches"):
+        try:
+            result = apply_ensemble_to_upcoming_matches(df, w_market=w_market, model_variant=model_variant)
+            for warning in result.attrs.get("warnings", []):
+                st.warning(warning)
+            save_active_probability_source(
+                {
+                    "source": "ensemble",
+                    "resolved_source": "ensemble",
+                    "w_market": float(result["ensemble_w_market"].iloc[0]),
+                    "w_model": float(result["ensemble_w_model"].iloc[0]),
+                    "reason": "Manual ensemble weights applied to current matches.",
+                }
+            )
+            st.session_state.probability_source = "ensemble"
+            st.session_state.ensemble_w_market = w_market
+            st.session_state.ensemble_model_variant = model_variant
+            st.success("Manual ensemble probabilities saved and selected for Kelly recommendations.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not apply manual ensemble: {exc}")
+
+    if ENSEMBLE_REPORT_PATH.exists():
+        st.subheader("Report")
+        st.caption(str(ENSEMBLE_REPORT_PATH))
+        st.markdown(ENSEMBLE_REPORT_PATH.read_text())
+
+
 def page_settings() -> None:
     st.title("Settings")
     st.subheader("Data mode")
@@ -1165,6 +1343,33 @@ def page_settings() -> None:
         st.caption(draw_status["reason"])
     else:
         st.info("Run the Draw Hypothesis comparison before enabling draw-context features for model training.")
+
+    st.subheader("Probability source for recommendations")
+    source_labels = {
+        "Best validated source": "best_validated",
+        "Market only": "market",
+        "Historical model": "historical_model",
+        "Draw-context model": "draw_context_model",
+        "Ensemble": "ensemble",
+    }
+    reverse_source_labels = {value: key for key, value in source_labels.items()}
+    selected_probability_source = st.selectbox(
+        "Kelly probability source",
+        list(source_labels.keys()),
+        index=list(source_labels.keys()).index(reverse_source_labels.get(st.session_state.probability_source, "Best validated source")),
+    )
+    st.session_state.probability_source = source_labels[selected_probability_source]
+    if st.session_state.probability_source == "ensemble":
+        st.session_state.ensemble_w_market = st.slider(
+            "Market weight",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(st.session_state.ensemble_w_market),
+            step=0.05,
+            key="settings_ensemble_w_market",
+        )
+        st.caption(ensemble_weight_badge(st.session_state.ensemble_w_market, 1 - st.session_state.ensemble_w_market))
+    st.caption("Changing source recalculates active probabilities and Kelly recommendations on the next app run.")
 
     status = get_active_model_status()
     cols = st.columns(4)
@@ -1372,6 +1577,8 @@ elif st.session_state.page == "Backtest & Metrics":
     page_backtest_metrics()
 elif st.session_state.page == "Draw Hypothesis":
     page_draw_hypothesis(df)
+elif st.session_state.page == "Ensemble":
+    page_ensemble(df)
 elif st.session_state.page == "Settings":
     page_settings()
 else:

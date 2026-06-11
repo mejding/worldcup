@@ -14,8 +14,15 @@ def _outcome_label(outcome: str) -> str:
     }[outcome]
 
 
+def _probability_for_outcome(row, outcome: str) -> float:
+    active_column = f"active_{outcome}_prob"
+    if active_column in row.index:
+        return float(row[active_column])
+    return float(row[f"model_{outcome}_prob"])
+
+
 def _build_candidate(row, outcome: str, odds_prefix: str, current_bankroll: float, profile: dict):
-    probability = float(row[f"model_{outcome}_prob"])
+    probability = _probability_for_outcome(row, outcome)
     odds = float(row[f"{odds_prefix}_{outcome}_odds"])
     if odds != odds or odds <= 1:
         candidate = {
@@ -104,6 +111,7 @@ def recommend_for_match(
     row,
     current_bankroll: float,
     staking_profile: dict = None,
+    probability_source: str = "active",
 ) -> dict:
     profile = DEFAULT_STAKING_PROFILE | (staking_profile or {})
 

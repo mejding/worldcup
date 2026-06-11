@@ -160,6 +160,47 @@ def small_sample_caveat(match_count: int) -> None:
         st.warning("Small sample caveat: fewer than 100 matches. Interpret results carefully.")
 
 
+def probability_source_badge(source: str) -> str:
+    labels = {
+        "market": "Market only",
+        "historical_model": "Historical model",
+        "draw_context_model": "Draw-context model",
+        "ensemble": "Market-aware ensemble",
+        "best_validated": "Best validated source",
+    }
+    color = {"market": "#64748b", "historical_model": "#2563eb", "draw_context_model": "#15803d", "ensemble": "#7c3aed"}.get(source, "#64748b")
+    return (
+        f"<span style='background:{color}; color:white; padding:0.18rem 0.48rem; "
+        f"border-radius:0.35rem; font-size:0.8rem; font-weight:600'>{labels.get(source, source)}</span>"
+    )
+
+
+def ensemble_weight_badge(w_market, w_model) -> str:
+    return f"Market {float(w_market):.0%} / Model {float(w_model):.0%}"
+
+
+def best_source_card(recommendation_dict: dict) -> None:
+    with st.container(border=True):
+        st.subheader("Best validated probability source")
+        st.metric("Recommended source", recommendation_dict.get("recommended_source", "market"))
+        st.caption(ensemble_weight_badge(recommendation_dict.get("w_market", 1), recommendation_dict.get("w_model", 0)))
+        st.caption(recommendation_dict.get("reason", "No recommendation available."))
+        for caveat in recommendation_dict.get("caveats", []):
+            st.warning(caveat)
+
+
+def metric_improvement_badge(delta, lower_is_better: bool = True) -> str:
+    if pd.isna(delta):
+        return "-"
+    delta = float(delta)
+    improved = delta < 0 if lower_is_better else delta > 0
+    color = "#15803d" if improved else "#b91c1c"
+    return (
+        f"<span style='background:{color}; color:white; padding:0.15rem 0.42rem; "
+        f"border-radius:0.35rem; font-size:0.8rem; font-weight:600'>{delta:+.4f}</span>"
+    )
+
+
 def odds_comparison_table(row) -> pd.DataFrame:
     rows = []
     for key, label in [("home", "H"), ("draw", "U"), ("away", "A")]:

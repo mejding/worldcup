@@ -26,6 +26,7 @@ from config import (
 from backtest_paths import REPORTS_DIR
 from bankroll import BANKROLL_HISTORY_COLUMNS, DEFAULT_BANKROLL_STATE, save_bankroll_state
 from bet_log import BET_LOG_COLUMNS
+from probability_sources import apply_probability_source
 
 RUNTIME_FILE_PAIRS = {
     BANKROLL_STATE_PATH: BANKROLL_STATE_EXAMPLE_PATH,
@@ -233,6 +234,11 @@ def load_predictions_by_mode(
     if model_source in {"market_only", "historical_model_if_available", "historical_model"}:
         live_df = _use_market_as_model(live_df)
     return live_df, warnings, "live"
+
+
+def apply_active_probability_source_to_predictions(df: pd.DataFrame, probability_source: str) -> tuple[pd.DataFrame, list[str]]:
+    result = apply_probability_source(df, probability_source)
+    return result, result.attrs.get("warnings", [])
 
 
 def _use_market_as_model(df: pd.DataFrame) -> pd.DataFrame:

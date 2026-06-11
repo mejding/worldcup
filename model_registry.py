@@ -5,8 +5,10 @@ import pandas as pd
 
 from backtest_paths import BACKTEST_BY_SEGMENT_PATH, BACKTEST_PREDICTIONS_PATH, BACKTEST_SUMMARY_PATH
 from backtest_paths import DRAW_FEATURE_COMPARISON_PATH
+from backtest_paths import ENSEMBLE_COMPARISON_PATH
 from config import MODEL_METADATA_PATH, MODEL_PATH
 from draw_hypothesis import recommend_draw_context_usage
+from ensemble_backtest import select_best_probability_source
 
 
 def model_exists(model_path: Path = MODEL_PATH) -> bool:
@@ -93,4 +95,26 @@ def get_latest_draw_context_status() -> dict:
         status.update(recommendation)
     except Exception as exc:
         status["reason"] = f"Could not read comparison results: {exc}"
+    return status
+
+
+def get_latest_ensemble_status() -> dict:
+    path = Path(ENSEMBLE_COMPARISON_PATH)
+    status = {
+        "comparison_exists": path.exists(),
+        "last_modified": None,
+        "recommended_source": "market",
+        "w_market": 1.0,
+        "w_model": 0.0,
+        "reason": "No ensemble comparison results available.",
+        "caveats": [],
+    }
+    if not path.exists() or path.stat().st_size == 0:
+        return status
+    status["last_modified"] = path.stat().st_mtime
+    try:
+        recommendation = select_best_probability_source(pd.read_csv(path))
+        status.update(recommendation)
+    except Exception as exc:
+        status["reason"] = f"Could not read ensemble comparison: {exc}"
     return status
