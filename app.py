@@ -402,6 +402,12 @@ def page_overview(df: pd.DataFrame) -> None:
             cols = st.columns([2.2, 1.1, 1.1, 1.2, 1.2, 1.4])
             cols[0].markdown(f"**{match_label(row)}**")
             cols[0].caption(f"{row['kickoff_time']} | Group {row['group']} | Matchday {row['matchday']}")
+            cols[0].caption(
+                "Model: "
+                f"H {format_percentage(row['model_home_prob'])} | "
+                f"U {format_percentage(row['model_draw_prob'])} | "
+                f"A {format_percentage(row['model_away_prob'])}"
+            )
             cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
             cols[2].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
             cols[3].metric("DS", row["recommended_outcome_ds"], format_dkk(row["recommended_stake_ds"]))
