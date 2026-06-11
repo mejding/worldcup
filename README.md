@@ -237,6 +237,44 @@ Metrics:
 
 The overall international backtest is the broadest and most stable view of model quality. The major tournament segment isolates World Cup, Euros, Copa América, AFCON, Asian Cup and Gold Cup-style matches inside the same walk-forward run. The World Cup-only sanity check trains before each selected World Cup year and tests only that tournament, but those samples are small and should not be treated as definitive evidence.
 
+## Draw Hypothesis and Draw-Context Features
+
+Sprint 8 adds empirical testing for the draw hypothesis:
+
+> In World Cup and major tournament group-stage matches, some teams may be strategically satisfied with a draw. This can increase the probability of a draw, depending on matchday, group state, qualification situation and relative team strength.
+
+The app tests this hypothesis instead of assuming it is true. It calculates draw rates by tournament category, major tournament flag, World Cup flag, neutral venue, group-stage metadata, group matchday, strength buckets and strategic draw-context fields.
+
+Group-state features are generated where historical data contains enough metadata such as `group`, `stage`, `matchday` or `group_matchday`. When metadata is missing, the app keeps matches in the dataset and uses neutral defaults. Because historical group-state metadata may be incomplete, results should be interpreted carefully.
+
+The group-state logic is intentionally conservative. It reconstructs pre-match group points, goal difference, goals for, group position and matches played where possible. Matchday 3 approximations are:
+
+- teams with 0 or 1 point are marked as must-win
+- teams with 4 or more points are marked as draw-sufficient
+- both teams draw-satisfied is true only when both teams are draw-sufficient
+
+These are not exact qualification simulations.
+
+Draw-context features include major tournament group flags, World Cup group flags, group matchday flags, even-match and heavy-favorite indicators, must-win indicators, draw-sufficient indicators, mutual draw acceptance and an explainable `draw_context_score` from 0 to 100. The score is explanatory and may be used as a model feature, but it does not manually override probabilities.
+
+Run this from the `Draw Hypothesis` page:
+
+1. Click `Run draw hypothesis analysis` to create draw-rate segment outputs and a report.
+2. Click `Compare baseline vs draw-context model` to run both walk-forward variants.
+3. Review the decision card before enabling draw-context features in Settings.
+
+Output files:
+
+- `data/processed/draw_hypothesis_summary.csv`
+- `data/processed/draw_hypothesis_by_segment.csv`
+- `data/processed/draw_feature_comparison.csv`
+- `data/processed/backtest_predictions_with_draw_features.csv`
+- `data/processed/backtest_summary_with_draw_features.csv`
+- `data/processed/group_state_features.csv`
+- `data/reports/draw_hypothesis_report.md`
+
+Draw-context features are included only when the user enables them for future training/apply-model runs. The app does not automatically switch the production model based on one comparison run.
+
 ## Kelly Profiles
 
 The default profile is Standard:

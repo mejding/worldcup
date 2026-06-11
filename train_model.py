@@ -19,7 +19,7 @@ from evaluation import (
     calculate_multiclass_brier_score,
     calculate_prediction_metrics,
 )
-from features import FEATURE_COLUMNS, build_training_dataset
+from features import FEATURE_COLUMNS, build_training_dataset, get_feature_columns
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 
 
@@ -38,9 +38,10 @@ def _split_train_test(training_df: pd.DataFrame, test_start_date: str = None):
     return train_df, test_df
 
 
-def _build_model_pipeline() -> Pipeline:
+def _build_model_pipeline(feature_columns=None) -> Pipeline:
+    feature_columns = feature_columns or FEATURE_COLUMNS
     categorical_features = ["tournament_category"]
-    numeric_features = [column for column in FEATURE_COLUMNS if column not in categorical_features]
+    numeric_features = [column for column in feature_columns if column not in categorical_features]
     preprocessor = ColumnTransformer(
         transformers=[
             (
@@ -63,19 +64,23 @@ def _build_model_pipeline() -> Pipeline:
     )
 
 
-def train_model_in_memory(training_df: pd.DataFrame) -> tuple[Pipeline, dict]:
+def train_model_in_memory(training_df: pd.DataFrame, include_draw_context_features: bool = False) -> tuple[Pipeline, dict]:
     if len(training_df) < 30:
         raise ValueError("Too little historical data to train a model. Add at least 30 matches.")
     if training_df["result"].nunique() < 3:
         raise ValueError("Training data must contain home wins, draws and away wins.")
-    model = _build_model_pipeline()
-    model.fit(training_df[FEATURE_COLUMNS], training_df["result"])
+    feature_columns = get_feature_columns(include_draw_context_features)
+    model = _build_model_pipeline(feature_columns)
+    model.fit(training_df[feature_columns], training_df["result"])
+    model.feature_columns_ = feature_columns
+    model.include_draw_context_features_ = include_draw_context_features
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "number_of_training_rows": int(len(training_df)),
         "date_min": str(training_df["date"].min()) if "date" in training_df.columns else None,
         "date_max": str(training_df["date"].max()) if "date" in training_df.columns else None,
-        "feature_columns": FEATURE_COLUMNS,
+        "feature_columns": feature_columns,
+        "include_draw_context_features": include_draw_context_features,
         "target_classes": list(model.named_steps["classifier"].classes_),
     }
     return model, metadata
@@ -84,7 +89,8 @@ def train_model_in_memory(training_df: pd.DataFrame) -> tuple[Pipeline, dict]:
 def predict_with_model(model, feature_df: pd.DataFrame) -> pd.DataFrame:
     if feature_df.empty:
         return pd.DataFrame(columns=["pred_home_prob", "pred_draw_prob", "pred_away_prob", "predicted_result", "confidence"])
-    probabilities = model.predict_proba(feature_df[FEATURE_COLUMNS])
+    feature_columns = getattr(model, "feature_columns_", FEATURE_COLUMNS)
+    probabilities = model.predict_proba(feature_df[feature_columns])
     labels = list(model.named_steps["classifier"].classes_)
     result = pd.DataFrame(0.0, index=feature_df.index, columns=["pred_home_prob", "pred_draw_prob", "pred_away_prob"])
     for label, column in [("H", "pred_home_prob"), ("D", "pred_draw_prob"), ("A", "pred_away_prob")]:
@@ -102,6 +108,7 @@ def train_historical_model(
     training_df: pd.DataFrame,
     test_start_date: str = None,
     model_output_path: Union[str, Path] = MODEL_PATH,
+    include_draw_context_features: bool = False,
 ) -> dict:
     if len(training_df) < 30:
         raise ValueError("Too little historical data to train a model. Add at least 30 matches.")
@@ -112,13 +119,16 @@ def train_historical_model(
     if train_df["result"].nunique() < 3:
         raise ValueError("Training data must contain home wins, draws and away wins.")
 
-    model = _build_model_pipeline()
+    feature_columns = get_feature_columns(include_draw_context_features)
+    model = _build_model_pipeline(feature_columns)
 
-    x_train = train_df[FEATURE_COLUMNS]
+    x_train = train_df[feature_columns]
     y_train = train_df["result"]
-    x_test = test_df[FEATURE_COLUMNS]
+    x_test = test_df[feature_columns]
     y_test = test_df["result"]
     model.fit(x_train, y_train)
+    model.feature_columns_ = feature_columns
+    model.include_draw_context_features_ = include_draw_context_features
     y_pred = model.predict(x_test)
     y_proba = model.predict_proba(x_test)
     labels = list(model.named_steps["classifier"].classes_)
@@ -131,14 +141,15 @@ def train_historical_model(
     model_output_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_output_path)
     FEATURE_COLUMNS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    FEATURE_COLUMNS_PATH.write_text(json.dumps(FEATURE_COLUMNS, indent=2))
+    FEATURE_COLUMNS_PATH.write_text(json.dumps(feature_columns, indent=2))
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "number_of_training_rows": int(len(train_df)),
         "number_of_test_rows": int(len(test_df)),
         "date_min": str(training_df["date"].min()),
         "date_max": str(training_df["date"].max()),
-        "feature_columns": FEATURE_COLUMNS,
+        "feature_columns": feature_columns,
+        "include_draw_context_features": include_draw_context_features,
         "target_classes": labels,
         "metrics": metrics,
     }
@@ -146,14 +157,14 @@ def train_historical_model(
     return metadata
 
 
-def train_from_historical_csv(input_path: Union[str, Path], test_start_date: str = None) -> dict:
+def train_from_historical_csv(input_path: Union[str, Path], test_start_date: str = None, include_draw_context_features: bool = False) -> dict:
     raw = load_historical_results(input_path)
     warnings, errors = validate_historical_results(raw)
     if errors:
         raise ValueError("; ".join(errors))
     standardized = standardize_historical_results(raw)
-    training_df = build_training_dataset(standardized)
-    metadata = train_historical_model(training_df, test_start_date=test_start_date)
+    training_df = build_training_dataset(standardized, include_draw_context_features=include_draw_context_features)
+    metadata = train_historical_model(training_df, test_start_date=test_start_date, include_draw_context_features=include_draw_context_features)
     metadata["warnings"] = warnings
     return metadata
 
@@ -162,8 +173,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="data/historical/international_results.csv")
     parser.add_argument("--test-start-date", default=None)
+    parser.add_argument("--include-draw-context-features", action="store_true")
     args = parser.parse_args()
-    metadata = train_from_historical_csv(args.input, args.test_start_date)
+    metadata = train_from_historical_csv(args.input, args.test_start_date, include_draw_context_features=args.include_draw_context_features)
     print(json.dumps(metadata, indent=2))
 
 

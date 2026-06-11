@@ -4,7 +4,9 @@ from pathlib import Path
 import pandas as pd
 
 from backtest_paths import BACKTEST_BY_SEGMENT_PATH, BACKTEST_PREDICTIONS_PATH, BACKTEST_SUMMARY_PATH
+from backtest_paths import DRAW_FEATURE_COMPARISON_PATH
 from config import MODEL_METADATA_PATH, MODEL_PATH
+from draw_hypothesis import recommend_draw_context_usage
 
 
 def model_exists(model_path: Path = MODEL_PATH) -> bool:
@@ -70,4 +72,25 @@ def get_latest_backtest_status() -> dict:
                 status["draw_calibration_gap"] = row.get("draw_calibration_gap")
         except Exception:
             pass
+    return status
+
+
+def get_latest_draw_context_status() -> dict:
+    path = Path(DRAW_FEATURE_COMPARISON_PATH)
+    status = {
+        "comparison_exists": path.exists(),
+        "last_modified": None,
+        "recommended": False,
+        "reason": "No comparison results available.",
+        "caveats": [],
+    }
+    if not path.exists() or path.stat().st_size == 0:
+        return status
+    status["last_modified"] = path.stat().st_mtime
+    try:
+        comparison = pd.read_csv(path)
+        recommendation = recommend_draw_context_usage(comparison)
+        status.update(recommendation)
+    except Exception as exc:
+        status["reason"] = f"Could not read comparison results: {exc}"
     return status

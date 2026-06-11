@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from backtest import run_walk_forward_backtest, run_world_cup_backtest
+from backtest import compare_baseline_vs_draw_context_model, run_walk_forward_backtest, run_world_cup_backtest
 from bankroll import load_bankroll_history, load_bankroll_state, reset_bankroll, update_bankroll
 from bet_log import add_bet, calculate_bet_summary, load_bet_log, reset_bet_settlement, settle_bet
 from charts import (
@@ -9,6 +9,9 @@ from charts import (
     bankroll_history_chart,
     confidence_calibration_chart,
     draw_calibration_chart,
+    draw_context_score_distribution_chart,
+    draw_feature_comparison_chart,
+    draw_rate_by_segment_chart,
     probability_comparison_chart,
     profit_loss_by_bookmaker_chart,
     profit_loss_by_outcome_chart,
@@ -19,6 +22,9 @@ from components import (
     calibration_gap_badge,
     draw_context_badge,
     draw_context_card,
+    draw_context_decision_card,
+    draw_context_score_badge,
+    draw_hypothesis_summary_card,
     empty_state,
     format_dkk,
     format_odds,
@@ -28,6 +34,7 @@ from components import (
     model_metric_explanation,
     odds_comparison_table,
     recommendation_card,
+    small_sample_caveat,
     small_sample_warning,
     status_badge,
 )
@@ -36,8 +43,14 @@ from backtest_paths import (
     BACKTEST_CALIBRATION_BINS_PATH,
     BACKTEST_DRAW_CALIBRATION_PATH,
     BACKTEST_PREDICTIONS_PATH,
+    BACKTEST_PREDICTIONS_WITH_DRAW_FEATURES_PATH,
     BACKTEST_REPORT_PATH,
     BACKTEST_SUMMARY_PATH,
+    BACKTEST_SUMMARY_WITH_DRAW_FEATURES_PATH,
+    DRAW_FEATURE_COMPARISON_PATH,
+    DRAW_HYPOTHESIS_BY_SEGMENT_PATH,
+    DRAW_HYPOTHESIS_REPORT_PATH,
+    DRAW_HYPOTHESIS_SUMMARY_PATH,
 )
 from config import (
     DEFAULT_PROFILE_NAME,
@@ -68,13 +81,15 @@ from data_loader import (
     load_predictions_by_mode,
     validate_predictions,
 )
+from draw_features import add_draw_context_features
+from draw_hypothesis import run_draw_hypothesis_analysis
 from fetch_fixtures import fetch_worldcup_fixtures
 from fetch_odds import append_odds_snapshot, fetch_odds_from_api
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import build_live_predictions
-from model_registry import get_active_model_status, get_latest_backtest_status
+from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status
 from odds_utils import calculate_edge
 from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
@@ -104,6 +119,8 @@ def init_session_state() -> None:
         st.session_state.model_source = MODEL_SOURCE
     if "active_model_source" not in st.session_state:
         st.session_state.active_model_source = "market_only"
+    if "use_draw_context_features" not in st.session_state:
+        st.session_state.use_draw_context_features = False
 
 
 def current_profile() -> dict:
@@ -302,10 +319,10 @@ def show_sidebar() -> None:
     st.sidebar.title("Navigation")
     st.session_state.page = st.sidebar.radio(
         "Side",
-        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"],
-        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"].index(
+        ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"],
+        index=["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"].index(
             st.session_state.page
-        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Settings", "About"] else 0,
+        ) if st.session_state.page in ["Overview", "Match Detail", "Bankroll", "Bet Log", "Analytics", "Backtest & Metrics", "Draw Hypothesis", "Settings", "About"] else 0,
     )
     st.sidebar.divider()
     st.sidebar.markdown("**Bankroll**")
@@ -840,13 +857,16 @@ def page_backtest_metrics() -> None:
                 except Exception as exc:
                     st.error(f"Could not run World Cup sanity check: {exc}")
 
-    predictions_df = _load_optional_csv(BACKTEST_PREDICTIONS_PATH)
-    summary_df = _load_optional_csv(BACKTEST_SUMMARY_PATH)
+    variant_label = st.radio("Model variant", ["Baseline model", "Draw-context model"], horizontal=True)
+    predictions_path = BACKTEST_PREDICTIONS_WITH_DRAW_FEATURES_PATH if variant_label == "Draw-context model" else BACKTEST_PREDICTIONS_PATH
+    summary_path = BACKTEST_SUMMARY_WITH_DRAW_FEATURES_PATH if variant_label == "Draw-context model" else BACKTEST_SUMMARY_PATH
+    predictions_df = _load_optional_csv(predictions_path)
+    summary_df = _load_optional_csv(summary_path)
     segment_df = _load_optional_csv(BACKTEST_BY_SEGMENT_PATH)
     draw_df = _load_optional_csv(BACKTEST_DRAW_CALIBRATION_PATH)
     calibration_df = _load_optional_csv(BACKTEST_CALIBRATION_BINS_PATH)
     if predictions_df.empty:
-        empty_state("No backtest results yet.")
+        empty_state(f"No {variant_label.lower()} backtest results yet.")
         return
 
     overall = segment_df[(segment_df["segment_name"] == "Overall") & (segment_df["segment_value"] == "All")].head(1)
@@ -895,6 +915,163 @@ def page_backtest_metrics() -> None:
         st.markdown(BACKTEST_REPORT_PATH.read_text())
     else:
         empty_state("No backtest report file yet.")
+
+    comparison_df = _load_optional_csv(DRAW_FEATURE_COMPARISON_PATH)
+    if not comparison_df.empty:
+        st.subheader("Baseline vs draw-context comparison")
+        st.caption("Improvement means lower log loss/Brier/ECE. Draw calibration gap closer to zero is better.")
+        render_chart(draw_feature_comparison_chart(comparison_df, "log_loss"))
+        st.dataframe(comparison_df, width="stretch", hide_index=True)
+
+
+def page_draw_hypothesis(df: pd.DataFrame) -> None:
+    st.title("Draw Hypothesis")
+    st.write(
+        "We test whether group-stage and major tournament contexts are associated with higher draw probabilities, "
+        "especially when one or both teams can live with a draw."
+    )
+    st.warning("Draw-context features are tested empirically. The app does not add a manual draw bonus unless model validation supports it.")
+
+    st.subheader("Data availability")
+    historical_exists = HISTORICAL_RESULTS_PATH.exists()
+    raw_historical = pd.DataFrame()
+    standardized = pd.DataFrame()
+    warnings = []
+    errors = []
+    if historical_exists:
+        try:
+            raw_historical = load_historical_results(HISTORICAL_RESULTS_PATH)
+            warnings, errors = validate_historical_results(raw_historical)
+            standardized = standardize_historical_results(raw_historical)
+        except Exception as exc:
+            errors = [str(exc)]
+    group_columns = {"group", "stage", "matchday", "group_matchday"}
+    available_group_cols = group_columns.intersection(set(raw_historical.columns)) if not raw_historical.empty else set()
+    group_metadata_status = "No"
+    if available_group_cols:
+        group_metadata_status = "Partial" if len(available_group_cols) < 2 else "Yes"
+    major_count = 0
+    world_cup_count = 0
+    group_count = 0
+    if not raw_historical.empty:
+        from features import categorize_tournament
+
+        categories = raw_historical.get("tournament", pd.Series(["Unknown"] * len(raw_historical))).map(categorize_tournament)
+        major_count = int(categories.isin({"world_cup", "euro", "copa_america", "afcon", "asian_cup", "gold_cup"}).sum())
+        world_cup_count = int((categories == "world_cup").sum())
+        if "group" in raw_historical.columns:
+            group_count = int(raw_historical["group"].notna().sum())
+        elif "stage" in raw_historical.columns:
+            group_count = int(raw_historical["stage"].astype(str).str.lower().str.contains("group", na=False).sum())
+    cols = st.columns(5)
+    cols[0].metric("Historical data", "Yes" if historical_exists else "No")
+    cols[1].metric("Group metadata", group_metadata_status)
+    cols[2].metric("Matches", str(len(raw_historical)))
+    cols[3].metric("Major tournament", str(major_count))
+    cols[4].metric("World Cup", str(world_cup_count))
+    st.caption(f"Matches with group-stage metadata: {group_count}")
+    for warning in warnings:
+        st.warning(warning)
+    for error in errors:
+        st.error(error)
+
+    st.subheader("Run draw hypothesis analysis")
+    if st.button("Run draw hypothesis analysis"):
+        if not historical_exists:
+            st.error("No historical data file found. Add data/historical/international_results.csv first.")
+        elif errors:
+            st.error("Historical data must be valid before running the analysis.")
+        else:
+            try:
+                with st.spinner("Running draw hypothesis analysis..."):
+                    result = run_draw_hypothesis_analysis(standardized)
+                st.success(f"Draw hypothesis analysis complete. Segments: {len(result['segments'])}")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not run draw hypothesis analysis: {exc}")
+
+    summary_df = _load_optional_csv(DRAW_HYPOTHESIS_SUMMARY_PATH)
+    segment_df = _load_optional_csv(DRAW_HYPOTHESIS_BY_SEGMENT_PATH)
+    comparison_df = _load_optional_csv(DRAW_FEATURE_COMPARISON_PATH)
+    if not summary_df.empty:
+        draw_rate = summary_df[summary_df["metric"] == "overall_draw_rate"]["value"].head(1)
+        group_rate = summary_df[summary_df["metric"] == "group_metadata_available_rate"]["value"].head(1)
+        draw_hypothesis_summary_card(
+            int(summary_df["match_count"].max()),
+            float(draw_rate.iloc[0]) if not draw_rate.empty else 0,
+            float(group_rate.iloc[0]) if not group_rate.empty else None,
+        )
+
+    st.subheader("Draw-rate by segment")
+    if segment_df.empty:
+        empty_state("No draw hypothesis results yet.")
+    else:
+        render_chart(draw_rate_by_segment_chart(segment_df))
+        st.dataframe(segment_df, width="stretch", hide_index=True)
+        small_sample_caveat(int(segment_df["match_count"].max()))
+
+    st.subheader("Baseline vs draw-context model comparison")
+    c1, c2, c3, c4 = st.columns(4)
+    initial_train_end_date = c1.date_input("Initial train end date", value=pd.Timestamp("2014-01-01").date(), key="draw_cmp_start")
+    test_window = c2.text_input("Test window", value="365D", key="draw_cmp_window")
+    step_size = c3.text_input("Step size", value="365D", key="draw_cmp_step")
+    min_train_matches = c4.number_input("Min train matches", min_value=30, value=1000, step=100, key="draw_cmp_min")
+    if st.button("Compare baseline vs draw-context model"):
+        if not historical_exists:
+            st.error("No historical data file found.")
+        elif errors:
+            st.error("Historical data must be valid before running model comparison.")
+        else:
+            try:
+                with st.spinner("Running baseline and draw-context backtests..."):
+                    result = compare_baseline_vs_draw_context_model(
+                        standardized,
+                        {
+                            "initial_train_end_date": initial_train_end_date.isoformat(),
+                            "test_window": test_window,
+                            "step_size": step_size,
+                            "min_train_matches": int(min_train_matches),
+                        },
+                    )
+                st.success(f"Comparison complete. Rows: {len(result['comparison'])}")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not compare models: {exc}")
+    if comparison_df.empty:
+        empty_state("No draw-feature comparison yet.")
+    else:
+        metric = st.selectbox("Comparison metric", ["log_loss", "brier_score", "draw_calibration_gap", "ece"], key="draw_cmp_metric")
+        render_chart(draw_feature_comparison_chart(comparison_df, metric))
+        st.dataframe(comparison_df, width="stretch", hide_index=True)
+        draw_context_decision_card(get_latest_draw_context_status())
+
+    st.subheader("Draw-context examples")
+    example_df = df.copy()
+    if "draw_context_score" not in example_df.columns:
+        example_df = add_draw_context_features(example_df)
+    render_chart(draw_context_score_distribution_chart(example_df))
+    columns = [
+        "home_team",
+        "away_team",
+        "draw_context_score",
+        "draw_context_label",
+        "both_teams_draw_satisfied",
+        "one_team_must_win",
+        "model_draw_prob",
+        "market_draw_prob",
+    ]
+    available_columns = [column for column in columns if column in example_df.columns]
+    display_examples = example_df[available_columns].copy()
+    if "draw_context_score" in display_examples.columns and "draw_context_label" in display_examples.columns:
+        display_examples["draw_context"] = display_examples.apply(
+            lambda row: draw_context_score_badge(row["draw_context_score"], row["draw_context_label"]),
+            axis=1,
+        )
+    st.dataframe(display_examples, width="stretch", hide_index=True)
+    if DRAW_HYPOTHESIS_REPORT_PATH.exists():
+        st.subheader("Report")
+        st.caption(str(DRAW_HYPOTHESIS_REPORT_PATH))
+        st.markdown(DRAW_HYPOTHESIS_REPORT_PATH.read_text())
 
 
 def page_settings() -> None:
@@ -974,6 +1151,21 @@ def page_settings() -> None:
     if st.session_state.model_source == "market_only":
         st.info("Using market-implied probabilities as model probabilities.")
 
+    st.subheader("Model feature settings")
+    st.session_state.use_draw_context_features = st.checkbox(
+        "Use draw-context features for future training/apply model runs",
+        value=bool(st.session_state.use_draw_context_features),
+    )
+    draw_status = get_latest_draw_context_status()
+    if draw_status["comparison_exists"]:
+        if draw_status["recommended"]:
+            st.success("Draw-context model appears beneficial based on latest comparison.")
+        else:
+            st.warning("Draw-context model is not currently recommended based on latest comparison.")
+        st.caption(draw_status["reason"])
+    else:
+        st.info("Run the Draw Hypothesis comparison before enabling draw-context features for model training.")
+
     status = get_active_model_status()
     cols = st.columns(4)
     with cols[0]:
@@ -1005,8 +1197,14 @@ def page_settings() -> None:
                         st.error(error)
                 else:
                     standardized = standardize_historical_results(raw)
-                    training_df = build_training_dataset(standardized)
-                    metadata = train_historical_model(training_df)
+                    training_df = build_training_dataset(
+                        standardized,
+                        include_draw_context_features=st.session_state.use_draw_context_features,
+                    )
+                    metadata = train_historical_model(
+                        training_df,
+                        include_draw_context_features=st.session_state.use_draw_context_features,
+                    )
                     st.success(
                         f"Model trained. Accuracy: {format_percentage(metadata['metrics']['accuracy'])}, "
                         f"log loss: {metadata['metrics']['log_loss']:.3f}"
@@ -1024,7 +1222,12 @@ def page_settings() -> None:
                 raw = load_historical_results(HISTORICAL_RESULTS_PATH)
                 standardized = standardize_historical_results(raw)
                 output_path = LIVE_PREDICTIONS_WITH_MODEL_PATH if actual_mode == "live" else MODEL_PREDICTIONS_PATH
-                _, model_warnings = predict_upcoming_matches(base_df, standardized, output_path=output_path)
+                _, model_warnings = predict_upcoming_matches(
+                    base_df,
+                    standardized,
+                    output_path=output_path,
+                    include_draw_context_features=st.session_state.use_draw_context_features,
+                )
                 for warning in model_warnings:
                     st.warning(warning)
                 st.session_state.model_source = "historical_model"
@@ -1167,6 +1370,8 @@ elif st.session_state.page == "Analytics":
     page_analytics()
 elif st.session_state.page == "Backtest & Metrics":
     page_backtest_metrics()
+elif st.session_state.page == "Draw Hypothesis":
+    page_draw_hypothesis(df)
 elif st.session_state.page == "Settings":
     page_settings()
 else:

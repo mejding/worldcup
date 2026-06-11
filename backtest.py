@@ -12,16 +12,20 @@ from backtest_paths import (
     BACKTEST_CALIBRATION_BINS_PATH,
     BACKTEST_DRAW_CALIBRATION_PATH,
     BACKTEST_PREDICTIONS_PATH,
+    BACKTEST_PREDICTIONS_WITH_DRAW_FEATURES_PATH,
     BACKTEST_REPORT_PATH,
     BACKTEST_SUMMARY_PATH,
+    BACKTEST_SUMMARY_WITH_DRAW_FEATURES_PATH,
+    DRAW_FEATURE_COMPARISON_PATH,
     PROCESSED_DATA_DIR,
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
 )
 from calibration import create_confidence_calibration_bins, create_draw_calibration_table
-from config import PROCESSED_DATA_DIR
+from draw_hypothesis import recommend_draw_context_usage
 from evaluation import calculate_prediction_metrics
 from features import _empty_stats, _feature_row, _update_elo, _update_stats, build_training_dataset, categorize_tournament
+from group_state import add_group_state_features
 from train_model import predict_with_model, train_model_in_memory
 
 
@@ -52,7 +56,7 @@ def _prepare_historical(df: pd.DataFrame) -> pd.DataFrame:
     return historical.sort_values("date").reset_index(drop=True)
 
 
-def _build_frozen_test_features(train_raw: pd.DataFrame, test_raw: pd.DataFrame) -> pd.DataFrame:
+def _build_frozen_test_features(train_raw: pd.DataFrame, test_raw: pd.DataFrame, include_draw_context_features: bool = False) -> pd.DataFrame:
     team_stats = defaultdict(_empty_stats)
     elos = defaultdict(lambda: 1500.0)
     for _, match in train_raw.sort_values("date").iterrows():
@@ -65,8 +69,13 @@ def _build_frozen_test_features(train_raw: pd.DataFrame, test_raw: pd.DataFrame)
             match["result"],
         )
         _update_elo(elos, match["home_team"], match["away_team"], match["result"])
+    test_source = test_raw.sort_values("date")
+    if include_draw_context_features:
+        combined = pd.concat([train_raw.assign(_is_test=False), test_raw.assign(_is_test=True)], ignore_index=True)
+        enriched = add_group_state_features(combined)
+        test_source = enriched[enriched["_is_test"]].sort_values("date")
     rows = []
-    for _, match in test_raw.sort_values("date").iterrows():
+    for _, match in test_source.iterrows():
         rows.append(
             {
                 "date": match["date"],
@@ -74,17 +83,38 @@ def _build_frozen_test_features(train_raw: pd.DataFrame, test_raw: pd.DataFrame)
                 "away_team": match["away_team"],
                 "result": match["result"],
                 "tournament": match.get("tournament", "Unknown"),
+                "stage": match.get("stage", pd.NA),
+                "group": match.get("group", pd.NA),
+                "matchday": match.get("matchday", match.get("group_matchday", 0)),
+                "group_matchday": match.get("group_matchday", 0),
+                "group_state_available": match.get("group_state_available", False),
+                "home_must_win": match.get("home_must_win", False),
+                "away_must_win": match.get("away_must_win", False),
+                "one_team_must_win": match.get("one_team_must_win", False),
+                "both_teams_need_win": match.get("both_teams_need_win", False),
+                "home_draw_sufficient": match.get("home_draw_sufficient", False),
+                "away_draw_sufficient": match.get("away_draw_sufficient", False),
+                "both_teams_draw_satisfied": match.get("both_teams_draw_satisfied", False),
                 **_feature_row(match, team_stats, elos),
             }
         )
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    if include_draw_context_features:
+        from draw_features import add_draw_context_features
+
+        result = add_draw_context_features(result)
+    return result
 
 
-def _run_single_fold(fold_id: int, train_raw: pd.DataFrame, test_raw: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+def _run_single_fold(fold_id: int, train_raw: pd.DataFrame, test_raw: pd.DataFrame, include_draw_context_features: bool = False) -> tuple[pd.DataFrame, dict]:
     with TemporaryDirectory() as tmpdir:
-        training_df = build_training_dataset(train_raw, output_path=Path(tmpdir) / "training_dataset.csv")
-    model, _ = train_model_in_memory(training_df)
-    test_features = _build_frozen_test_features(train_raw, test_raw)
+        training_df = build_training_dataset(
+            train_raw,
+            output_path=Path(tmpdir) / "training_dataset.csv",
+            include_draw_context_features=include_draw_context_features,
+        )
+    model, _ = train_model_in_memory(training_df, include_draw_context_features=include_draw_context_features)
+    test_features = _build_frozen_test_features(train_raw, test_raw, include_draw_context_features=include_draw_context_features)
     predictions = predict_with_model(model, test_features)
     output = pd.concat(
         [
@@ -114,10 +144,18 @@ def _summary_row(fold_id: int, train_raw: pd.DataFrame, test_raw: pd.DataFrame, 
     return row
 
 
-def _save_backtest_outputs(predictions_df: pd.DataFrame, summary_df: pd.DataFrame, output_dir: Path, setup: dict) -> dict:
+def _save_backtest_outputs(
+    predictions_df: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    output_dir: Path,
+    setup: dict,
+    include_draw_context_features: bool = False,
+) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
-    predictions_path = output_dir / BACKTEST_PREDICTIONS_PATH.name
-    summary_path = output_dir / BACKTEST_SUMMARY_PATH.name
+    predictions_name = BACKTEST_PREDICTIONS_WITH_DRAW_FEATURES_PATH.name if include_draw_context_features else BACKTEST_PREDICTIONS_PATH.name
+    summary_name = BACKTEST_SUMMARY_WITH_DRAW_FEATURES_PATH.name if include_draw_context_features else BACKTEST_SUMMARY_PATH.name
+    predictions_path = output_dir / predictions_name
+    summary_path = output_dir / summary_name
     segment_path = output_dir / BACKTEST_BY_SEGMENT_PATH.name
     draw_path = output_dir / BACKTEST_DRAW_CALIBRATION_PATH.name
     calibration_path = output_dir / BACKTEST_CALIBRATION_BINS_PATH.name
@@ -160,6 +198,7 @@ def run_walk_forward_backtest(
     step_size="365D",
     min_train_matches: int = 1000,
     output_dir: Path | None = None,
+    include_draw_context_features: bool = False,
 ) -> dict:
     historical = _prepare_historical(historical_df)
     if historical.empty:
@@ -168,6 +207,7 @@ def run_walk_forward_backtest(
             pd.DataFrame(),
             Path(output_dir or PROCESSED_DATA_DIR),
             {"warning": "No valid historical matches"},
+            include_draw_context_features=include_draw_context_features,
         )
     cutoff = pd.to_datetime(initial_train_end_date, utc=True)
     max_date = historical["date"].max()
@@ -180,7 +220,7 @@ def run_walk_forward_backtest(
         test_raw = historical[(historical["date"] >= cutoff) & (historical["date"] < test_end)].copy()
         if len(train_raw) >= min_train_matches and not test_raw.empty:
             try:
-                predictions_df, metrics = _run_single_fold(fold_id, train_raw, test_raw)
+                predictions_df, metrics = _run_single_fold(fold_id, train_raw, test_raw, include_draw_context_features=include_draw_context_features)
                 prediction_frames.append(predictions_df)
                 fold_rows.append(_summary_row(fold_id, train_raw, test_raw, metrics))
                 fold_id += 1
@@ -206,8 +246,9 @@ def run_walk_forward_backtest(
         "test_window": str(test_window),
         "step_size": str(step_size),
         "min_train_matches": min_train_matches,
+        "include_draw_context_features": include_draw_context_features,
     }
-    return _save_backtest_outputs(predictions, summary, Path(output_dir or PROCESSED_DATA_DIR), setup)
+    return _save_backtest_outputs(predictions, summary, Path(output_dir or PROCESSED_DATA_DIR), setup, include_draw_context_features=include_draw_context_features)
 
 
 def run_world_cup_backtest(historical_df: pd.DataFrame, world_cup_years=None, output_dir: Path | None = None) -> dict:
@@ -250,3 +291,58 @@ def run_world_cup_backtest(historical_df: pd.DataFrame, world_cup_years=None, ou
     predictions_df.to_csv(predictions_path, index=False)
     summary_df.to_csv(summary_path, index=False)
     return {"predictions": predictions_df, "summary": summary_df, "paths": {"predictions": predictions_path, "summary": summary_path}}
+
+
+def _comparison_rows(result: dict, variant: str) -> list[dict]:
+    rows = []
+    segments = result.get("segments", pd.DataFrame())
+    wanted = [
+        ("overall", segments[(segments["segment_name"] == "Overall") & (segments["segment_value"] == "All")] if not segments.empty else pd.DataFrame()),
+        ("major_tournament", segments[(segments["segment_name"] == "major_tournament") & (segments["segment_value"] == "major")] if not segments.empty else pd.DataFrame()),
+        ("world_cup", segments[(segments["segment_name"] == "tournament_category") & (segments["segment_value"] == "world_cup")] if not segments.empty else pd.DataFrame()),
+    ]
+    for segment_name, segment_df in wanted:
+        if segment_df.empty:
+            continue
+        row = segment_df.iloc[0]
+        rows.append(
+            {
+                "model_variant": variant,
+                "segment": segment_name,
+                "match_count": int(row.get("match_count", 0)),
+                "accuracy": row.get("accuracy", 0.0),
+                "log_loss": row.get("log_loss", 0.0),
+                "brier_score": row.get("brier_score", 0.0),
+                "ece": row.get("ece", 0.0),
+                "draw_calibration_gap": row.get("draw_calibration_gap", 0.0),
+                "avg_pred_draw_prob": row.get("avg_pred_draw_prob", 0.0),
+                "actual_draw_rate": row.get("actual_draw_rate", 0.0),
+            }
+        )
+    return rows
+
+
+def compare_baseline_vs_draw_context_model(historical_df: pd.DataFrame, backtest_config: dict) -> dict:
+    from tempfile import TemporaryDirectory
+
+    config = {
+        "initial_train_end_date": backtest_config.get("initial_train_end_date", "2014-01-01"),
+        "test_window": backtest_config.get("test_window", "365D"),
+        "step_size": backtest_config.get("step_size", "365D"),
+        "min_train_matches": int(backtest_config.get("min_train_matches", 1000)),
+    }
+    with TemporaryDirectory() as baseline_tmp:
+        baseline = run_walk_forward_backtest(historical_df, output_dir=Path(baseline_tmp), include_draw_context_features=False, **config)
+    draw_context = run_walk_forward_backtest(historical_df, output_dir=PROCESSED_DATA_DIR, include_draw_context_features=True, **config)
+    comparison_df = pd.DataFrame(_comparison_rows(baseline, "baseline") + _comparison_rows(draw_context, "draw_context"))
+    comparison_path = DRAW_FEATURE_COMPARISON_PATH
+    comparison_path.parent.mkdir(parents=True, exist_ok=True)
+    comparison_df.to_csv(comparison_path, index=False)
+    recommendation = recommend_draw_context_usage(comparison_df)
+    return {
+        "baseline": baseline,
+        "draw_context": draw_context,
+        "comparison": comparison_df,
+        "recommendation": recommendation,
+        "paths": {"comparison": comparison_path},
+    }

@@ -5,6 +5,8 @@ from typing import Union
 import pandas as pd
 
 from config import TRAINING_DATASET_PATH
+from draw_features import DRAW_CONTEXT_FEATURE_COLUMNS, add_draw_context_features
+from group_state import GROUP_STATE_COLUMNS, add_group_state_features
 
 
 DEFAULTS = {
@@ -52,6 +54,12 @@ FEATURE_COLUMNS = [
     "elo_diff",
     "tournament_category",
 ]
+
+
+def get_feature_columns(include_draw_context_features: bool = False) -> list[str]:
+    if not include_draw_context_features:
+        return FEATURE_COLUMNS.copy()
+    return FEATURE_COLUMNS + DRAW_CONTEXT_FEATURE_COLUMNS
 
 
 def categorize_tournament(tournament: str) -> str:
@@ -189,11 +197,25 @@ def _update_stats(team_stats, home_team, away_team, home_score, away_score, resu
         stats["history"].append({"points": points, "gf": float(gf), "ga": float(ga)})
 
 
-def build_training_dataset(df: pd.DataFrame, output_path: Union[str, Path] = TRAINING_DATASET_PATH) -> pd.DataFrame:
+def _optional_match_metadata(match) -> dict:
+    metadata = {}
+    for column in ["stage", "group", "matchday", "group_matchday"] + GROUP_STATE_COLUMNS:
+        if column in match.index:
+            metadata[column] = match[column]
+    return metadata
+
+
+def _build_training_dataset(
+    df: pd.DataFrame,
+    output_path: Union[str, Path] = TRAINING_DATASET_PATH,
+    include_draw_context_features: bool = False,
+) -> pd.DataFrame:
     matches = df.copy()
     matches["date"] = pd.to_datetime(matches["date"], errors="coerce", utc=True)
     matches = matches.dropna(subset=["date", "home_team", "away_team", "home_score", "away_score", "result"])
     matches = matches.sort_values("date").reset_index(drop=True)
+    if include_draw_context_features:
+        matches = add_group_state_features(matches)
     team_stats = defaultdict(_empty_stats)
     elos = defaultdict(lambda: DEFAULTS["elo"])
     rows = []
@@ -203,6 +225,8 @@ def build_training_dataset(df: pd.DataFrame, output_path: Union[str, Path] = TRA
             "home_team": match["home_team"],
             "away_team": match["away_team"],
             "result": match["result"],
+            "tournament": match.get("tournament", "Unknown"),
+            **_optional_match_metadata(match),
             **_feature_row(match, team_stats, elos),
         }
         rows.append(row)
@@ -216,12 +240,33 @@ def build_training_dataset(df: pd.DataFrame, output_path: Union[str, Path] = TRA
         )
         _update_elo(elos, match["home_team"], match["away_team"], match["result"])
     result = pd.DataFrame(rows)
+    if include_draw_context_features:
+        result = add_draw_context_features(result)
+        for column in DRAW_CONTEXT_FEATURE_COLUMNS:
+            if column not in result.columns:
+                result[column] = 0
+            if result[column].dtype == bool:
+                result[column] = result[column].astype(bool)
+            else:
+                result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(output_path, index=False)
     return result
 
 
-def build_upcoming_feature_dataset(upcoming_df: pd.DataFrame, historical_df: pd.DataFrame) -> pd.DataFrame:
+def build_training_dataset(
+    df: pd.DataFrame,
+    output_path: Union[str, Path] = TRAINING_DATASET_PATH,
+    include_draw_context_features: bool = False,
+) -> pd.DataFrame:
+    return _build_training_dataset(df, output_path=output_path, include_draw_context_features=include_draw_context_features)
+
+
+def build_upcoming_feature_dataset(
+    upcoming_df: pd.DataFrame,
+    historical_df: pd.DataFrame,
+    include_draw_context_features: bool = False,
+) -> pd.DataFrame:
     historical = historical_df.copy()
     historical["date"] = pd.to_datetime(historical["date"], errors="coerce", utc=True)
     upcoming = upcoming_df.copy()
@@ -241,6 +286,21 @@ def build_upcoming_feature_dataset(upcoming_df: pd.DataFrame, historical_df: pd.
             "away_team": upcoming_match["away_team"],
             "neutral": True,
             "tournament": "World Cup",
+            "group": upcoming_match.get("group", pd.NA),
+            "matchday": upcoming_match.get("matchday", 0),
+            "group_matchday": upcoming_match.get("matchday", 0),
+            "group_state_available": False,
         }
-        combined_rows.append(_feature_row(feature_match, team_stats, elos))
-    return pd.DataFrame(combined_rows, columns=FEATURE_COLUMNS)
+        row = {
+            **feature_match,
+            **_feature_row(feature_match, team_stats, elos),
+        }
+        combined_rows.append(row)
+    result = pd.DataFrame(combined_rows)
+    if include_draw_context_features:
+        result = add_draw_context_features(result)
+    columns = get_feature_columns(include_draw_context_features)
+    for column in columns:
+        if column not in result.columns:
+            result[column] = 0
+    return result[columns]

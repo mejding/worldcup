@@ -123,6 +123,43 @@ def model_metric_explanation(metric_name: str) -> str:
     return explanations.get(metric_name, "")
 
 
+def draw_hypothesis_summary_card(match_count: int, draw_rate, group_metadata_rate=None) -> None:
+    with st.container(border=True):
+        st.subheader("Draw hypothesis summary")
+        cols = st.columns(3)
+        cols[0].metric("Matches", str(int(match_count or 0)))
+        cols[1].metric("Draw rate", format_percentage(draw_rate or 0))
+        cols[2].metric(
+            "Group metadata",
+            "-" if group_metadata_rate is None or pd.isna(group_metadata_rate) else format_percentage(group_metadata_rate),
+        )
+
+
+def draw_context_decision_card(recommendation_dict: dict) -> None:
+    recommended = bool(recommendation_dict.get("recommended", False))
+    with st.container(border=True):
+        st.subheader("Draw-context model decision")
+        st.metric("Recommended", "Yes" if recommended else "No")
+        st.caption(recommendation_dict.get("reason", "No recommendation available."))
+        for caveat in recommendation_dict.get("caveats", []):
+            st.warning(caveat)
+
+
+def draw_context_score_badge(score, label) -> str:
+    if pd.isna(score):
+        return "-"
+    color = {"Low": "#64748b", "Medium": "#a16207", "High": "#15803d"}.get(str(label), "#64748b")
+    return (
+        f"<span style='background:{color}; color:white; padding:0.18rem 0.48rem; "
+        f"border-radius:0.35rem; font-size:0.8rem; font-weight:600'>{float(score):.0f} / {label}</span>"
+    )
+
+
+def small_sample_caveat(match_count: int) -> None:
+    if int(match_count or 0) < 100:
+        st.warning("Small sample caveat: fewer than 100 matches. Interpret results carefully.")
+
+
 def odds_comparison_table(row) -> pd.DataFrame:
     rows = []
     for key, label in [("home", "H"), ("draw", "U"), ("away", "A")]:

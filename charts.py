@@ -113,6 +113,53 @@ def segment_metric_chart(segment_df: pd.DataFrame, metric: str, segment_name: st
     return fig
 
 
+def draw_rate_by_segment_chart(segment_df: pd.DataFrame):
+    if segment_df.empty or "draw_rate" not in segment_df.columns:
+        return None
+    chart_df = segment_df[segment_df["segment_name"] != "overall"].copy()
+    if chart_df.empty:
+        return None
+    chart_df["label"] = chart_df["segment_name"] + ": " + chart_df["segment_value"].astype(str)
+    chart_df = chart_df.sort_values("match_count", ascending=False).head(20)
+    fig = px.bar(chart_df, x="label", y="draw_rate", text_auto=".1%")
+    if "baseline_draw_rate" in chart_df.columns:
+        baseline = float(chart_df["baseline_draw_rate"].iloc[0])
+        fig.add_hline(y=baseline, line_dash="dash", line_color="#64748b")
+    fig.update_layout(height=380, margin=dict(l=10, r=10, t=30, b=10), yaxis_tickformat=".0%", xaxis_title="")
+    return fig
+
+
+def draw_feature_comparison_chart(comparison_df: pd.DataFrame, metric: str):
+    if comparison_df.empty or metric not in comparison_df.columns:
+        return None
+    fig = px.bar(comparison_df, x="segment", y=metric, color="model_variant", barmode="group", text_auto=".3f")
+    fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Segment", yaxis_title=metric)
+    return fig
+
+
+def draw_context_score_distribution_chart(df: pd.DataFrame):
+    if df.empty or "draw_context_score" not in df.columns:
+        return None
+    fig = px.histogram(df, x="draw_context_score", nbins=20, color="draw_context_label" if "draw_context_label" in df.columns else None)
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Draw-context score")
+    return fig
+
+
+def draw_calibration_comparison_chart(baseline_df: pd.DataFrame, draw_context_df: pd.DataFrame):
+    if baseline_df.empty or draw_context_df.empty:
+        return None
+    base = baseline_df.copy()
+    base["model_variant"] = "baseline"
+    draw = draw_context_df.copy()
+    draw["model_variant"] = "draw_context"
+    combined = pd.concat([base, draw], ignore_index=True)
+    if "calibration_gap" not in combined.columns:
+        return None
+    fig = px.bar(combined, x="bin_label", y="calibration_gap", color="model_variant", barmode="group", text_auto=".2f")
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Draw probability bin")
+    return fig
+
+
 def render_chart(fig) -> None:
     if fig is None:
         st.info("Ingen data at vise endnu.")
