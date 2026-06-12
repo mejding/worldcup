@@ -120,3 +120,67 @@ def test_odds_events_match_official_fixtures_by_teams_and_date(tmp_path):
     assert df.iloc[0]["match_id"] == "WC2026-GRA-001"
     assert df.iloc[0]["fixture_source"] == "official_reference"
     assert df.iloc[0]["group"] == "A"
+
+
+def test_manual_match_id_odds_build_official_fixture_prediction(tmp_path):
+    fixtures = pd.DataFrame(
+        [
+            {
+                "match_id": "WC2026-GRA-001",
+                "kickoff_utc": "2026-06-11T19:00:00Z",
+                "group": "A",
+                "matchday": 1,
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+            }
+        ]
+    )
+    odds = pd.DataFrame(
+        [
+            {
+                "fetched_at": "2026-06-12",
+                "event_id": "WC2026-GRA-001",
+                "commence_time": "2026-06-11T19:00:00Z",
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+                "bookmaker_key": "danske_spil",
+                "bookmaker_title": "Danske Spil",
+                "market_key": "h2h",
+                "outcome_name": "Mexico",
+                "outcome_price": 1.44,
+            },
+            {
+                "fetched_at": "2026-06-12",
+                "event_id": "WC2026-GRA-001",
+                "commence_time": "2026-06-11T19:00:00Z",
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+                "bookmaker_key": "danske_spil",
+                "bookmaker_title": "Danske Spil",
+                "market_key": "h2h",
+                "outcome_name": "Draw",
+                "outcome_price": 4.0,
+            },
+            {
+                "fetched_at": "2026-06-12",
+                "event_id": "WC2026-GRA-001",
+                "commence_time": "2026-06-11T19:00:00Z",
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+                "bookmaker_key": "danske_spil",
+                "bookmaker_title": "Danske Spil",
+                "market_key": "h2h",
+                "outcome_name": "South Africa",
+                "outcome_price": 7.0,
+            },
+        ]
+    )
+
+    df = build_live_predictions(odds, fixtures_df=fixtures, output_path=tmp_path / "live.csv")
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["match_id"] == "WC2026-GRA-001"
+    assert row["ds_home_odds"] == 1.44
+    assert row["best_home_odds"] == 1.44
+    assert row["market_home_prob"] == pytest.approx(0.6386861314)

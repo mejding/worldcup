@@ -77,6 +77,7 @@ from config import (
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
     LIVE_PREDICTIONS_WITH_MODEL_PATH,
+    MANUAL_ODDS_PATH,
     MODEL_PATH,
     MODEL_PREDICTIONS_PATH,
     MODEL_SOURCE,
@@ -108,7 +109,7 @@ from draw_hypothesis import run_draw_hypothesis_analysis
 from ensemble import apply_ensemble_to_upcoming_matches
 from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
 from fetch_fixtures import fetch_worldcup_fixtures
-from fetch_odds import append_odds_snapshot, fetch_odds_from_api
+from fetch_odds import append_odds_snapshot, fetch_odds_from_api, load_manual_odds
 from fixture_data import fixture_provenance, load_fixture_dataset, validate_fixture_dataset
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
@@ -834,11 +835,14 @@ def odds_availability_message(df: pd.DataFrame) -> Optional[str]:
     )
     if has_best_odds:
         return None
+    manual_freshness = get_data_freshness(MANUAL_ODDS_PATH)
     if not get_secret_or_env("ODDS_API_KEY"):
-        return "Odds findes på markedet, men appen kan ikke hente dem endnu: ODDS_API_KEY mangler i miljøet/Streamlit secrets."
+        if manual_freshness["row_count"] > 0:
+            return "Oddsfilen har rækker, men live predictions er ikke bygget endnu. Kør Import manual odds under Advanced / Admin."
+        return "Odds findes på markedet, men appen mangler en datakilde: tilføj ODDS_API_KEY i Streamlit secrets eller udfyld data/reference/manual_odds.csv."
     live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
     if not live_freshness["file_exists"] or live_freshness["row_count"] == 0:
-        return "Odds API key er sat, men live odds er ikke hentet endnu. Kør Fetch latest odds under Advanced / Admin."
+        return "Odds API key er sat, men live odds er ikke hentet endnu. Kør Fetch latest odds eller Import manual odds under Advanced / Admin."
     return "Live predictions er indlæst, men ingen 1X2-odds matchede fixtures. Tjek odds-providerens sport key/regions og bookmaker coverage."
 
 
@@ -2041,19 +2045,57 @@ def page_settings() -> None:
     api_key_configured = bool(get_secret_or_env("ODDS_API_KEY"))
     live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
     fixture_freshness = get_data_freshness(REFERENCE_FIXTURES_PATH)
-    c1, c2, c3 = st.columns(3)
+    manual_odds_freshness = get_data_freshness(MANUAL_ODDS_PATH)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         metric_card("Current mode", st.session_state.data_mode.title())
     with c2:
         metric_card("Fixture rows", str(fixture_freshness["row_count"]))
     with c3:
         metric_card("API key", "Configured" if api_key_configured else "Missing")
+    with c4:
+        metric_card("Manual odds rows", str(manual_odds_freshness["row_count"]))
     st.caption(fixture_provenance_text(st.session_state.data_mode))
     if st.session_state.data_mode == "sample":
         st.warning("Sample/demo data is for testing UI only and is not official World Cup fixture data.")
     if st.session_state.data_mode == "live" and not live_freshness["file_exists"]:
         st.warning("Live predictions are missing. The app will show no live matches until fixtures/odds are fetched; sample fallback is disabled.")
-    if st.button("Fetch latest odds"):
+    st.caption(f"Manual odds file: {MANUAL_ODDS_PATH}")
+    odds_action_1, odds_action_2 = st.columns(2)
+    with odds_action_1:
+        import_manual_odds = st.button("Import manual odds")
+    with odds_action_2:
+        fetch_latest_odds = st.button("Fetch latest odds from API")
+
+    if import_manual_odds:
+        try:
+            fixtures_df = fetch_worldcup_fixtures()
+            odds_df = load_manual_odds(MANUAL_ODDS_PATH, fixtures_df=fixtures_df)
+            if odds_df.empty:
+                st.error(
+                    "Manual odds file is empty or incomplete. Add one row per 1X2 outcome with match_id, bookmaker, outcome_name and outcome_price."
+                )
+            else:
+                append_odds_snapshot(odds_df, ODDS_SNAPSHOT_PATH)
+                live_df = build_live_predictions(
+                    odds_df,
+                    fixtures_df=fixtures_df,
+                    preferred_bookmaker_names=PREFERRED_BOOKMAKER_NAMES,
+                )
+                live_warnings, live_errors = validate_predictions(live_df)
+                if live_errors:
+                    for error in live_errors:
+                        st.error(error)
+                else:
+                    for warning in live_warnings:
+                        st.warning(warning)
+                    st.session_state.data_mode = "live"
+                    st.success(f"Manual odds imported. Built {len(live_df)} app-ready matches.")
+                    st.rerun()
+        except Exception as exc:
+            st.error(f"Could not import manual odds: {exc}")
+
+    if fetch_latest_odds:
         api_key = get_secret_or_env("ODDS_API_KEY")
         if not api_key:
             st.error("ODDS_API_KEY is not configured. Add it via environment variable or Streamlit secrets.")

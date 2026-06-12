@@ -163,7 +163,7 @@ Do not commit `.env` or `.streamlit/secrets.toml`.
    - main file path: `app.py`
 5. Deploy.
 6. No secrets are needed for official fixture mode or sample/demo mode.
-7. For live odds, add `ODDS_API_KEY` via Streamlit secrets.
+7. For API-based live odds, add `ODDS_API_KEY` via Streamlit secrets. If the API is missing coverage, use `data/reference/manual_odds.csv` and import it from Advanced / Admin.
 
 The default deployed mode uses the fixture reference file and does not require API keys.
 
@@ -191,11 +191,17 @@ Live odds mode also writes runtime files that are ignored by git:
 
 Raw odds snapshots are appended. Processed live predictions are regenerated into the prediction schema plus fixture provenance columns such as `kickoff_utc` and `fixture_source`.
 
+Manual odds can be entered in:
+
+- `data/reference/manual_odds.csv`
+
+Add one row per bookmaker/outcome. The smallest useful complete match has three rows: home, draw and away. If `match_id` matches the official fixture file, the app fills kickoff and teams automatically during import. Use `outcome_price` for decimal odds and keep `market_key` as `h2h`.
+
 ## Streamlit Secrets
 
 No secrets are required for official fixture mode or sample/demo mode.
 
-Live odds mode requires `ODDS_API_KEY`.
+API-based live odds mode requires `ODDS_API_KEY`. Manual odds import does not require secrets.
 
 Local environment variable:
 
@@ -219,11 +225,12 @@ Do not commit real secrets. `.streamlit/secrets.toml.example` is committed only 
 
 ## Live Odds Mode
 
-Sample data mode works without API keys. Live odds mode requires an API key from The Odds API or a compatible provider that supports football 1X2/h2h odds.
+Sample data mode works without API keys. Live odds can come from The Odds API or from the manual odds file when API coverage is missing.
 
 Live mode currently does this:
 
 - Fetches h2h odds for `soccer_fifa_world_cup`
+- Imports manual h2h odds from `data/reference/manual_odds.csv`
 - Normalizes bookmaker/outcome rows
 - Matches odds API events to official fixtures by match ID first, then by normalized teams and kickoff date
 - Detects draw outcomes such as `Draw`, `Tie`, `X` or `Uafgjort`
@@ -238,7 +245,7 @@ Because the historical ML model has not been added yet, live mode sets:
 - `model_draw_prob = market_draw_prob`
 - `model_away_prob = market_away_prob`
 
-Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app keeps official fixtures visible where possible and shows missing odds as `No bet`; it does not silently replace live/official data with sample fixtures.
+Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app keeps official fixtures visible where possible and shows missing odds as `No bet`; it does not silently replace live/official data with sample fixtures. If you can find odds manually, add them to `data/reference/manual_odds.csv` and click `Import manual odds` under Advanced / Admin.
 
 ## Historical Model
 
@@ -431,7 +438,7 @@ Example:
 - If the app cannot find official fixtures, confirm that `data/reference/worldcup_2026_fixtures.csv` is committed.
 - If sample/demo mode fails, confirm that `data/sample_predictions.csv` is committed.
 - If bankroll or bet-log files are missing, restart the app; runtime files are recreated automatically.
-- If live odds mode says `ODDS_API_KEY` is missing, add it via environment variable or Streamlit secrets.
+- If live odds mode says `ODDS_API_KEY` is missing, add it via environment variable/Streamlit secrets or import `data/reference/manual_odds.csv`.
 - If the odds API returns no events, rate limits or omits draw odds, the app keeps official fixture rows where possible and shows a warning.
 - If a bet cannot be settled, check that it is still pending. Double settlement is intentionally blocked.
 - If the app shows sample-data validation errors, fix `data/sample_predictions.csv` before using demo mode.

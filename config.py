@@ -13,6 +13,7 @@ REFERENCE_DATA_DIR = DATA_DIR / "reference"
 
 SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
 REFERENCE_FIXTURES_PATH = REFERENCE_DATA_DIR / "worldcup_2026_fixtures.csv"
+MANUAL_ODDS_PATH = REFERENCE_DATA_DIR / "manual_odds.csv"
 LIVE_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "live_predictions.csv"
 MODEL_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "model_predictions.csv"
 LIVE_PREDICTIONS_WITH_MODEL_PATH = PROCESSED_DATA_DIR / "live_predictions_with_model.csv"
