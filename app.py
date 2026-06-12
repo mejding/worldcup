@@ -1067,6 +1067,10 @@ def page_overview(df: pd.DataFrame) -> None:
         filtered = filtered[filtered["recommendation_status"] == "Playable at Danske Spil"]
     if better_elsewhere_only:
         filtered = filtered[filtered["recommendation_status"] == "Better elsewhere"]
+    if "kickoff_time" in filtered.columns:
+        filtered["_kickoff_sort"] = pd.to_datetime(filtered["kickoff_time"], errors="coerce", utc=True)
+        filtered = filtered.sort_values(["_kickoff_sort", "group", "matchday", "match_id"], na_position="last")
+        filtered = filtered.drop(columns=["_kickoff_sort"])
 
     for _, row in filtered.iterrows():
         compact_match_card(row)
