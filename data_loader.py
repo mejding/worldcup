@@ -306,4 +306,27 @@ def get_data_freshness(path: Union[str, Path]) -> dict:
 def load_odds_snapshot(path: Union[str, Path] = ODDS_SNAPSHOT_PATH) -> pd.DataFrame:
     from fetch_odds import ODDS_COLUMNS
 
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        return load_csv_with_columns(path, ODDS_COLUMNS)
+    try:
+        df = pd.read_csv(path)
+    except EmptyDataError:
+        return load_csv_with_columns(path, ODDS_COLUMNS)
+    if "fetched_at_utc" in df.columns:
+        result = pd.DataFrame(
+            {
+                "fetched_at": df.get("fetched_at_utc"),
+                "event_id": df.get("event_id"),
+                "commence_time": df.get("commence_time_utc"),
+                "home_team": df.get("home_team"),
+                "away_team": df.get("away_team"),
+                "bookmaker_key": df.get("bookmaker_key"),
+                "bookmaker_title": df.get("bookmaker_title"),
+                "market_key": df.get("market_key"),
+                "outcome_name": df.get("outcome_name"),
+                "outcome_price": df.get("outcome_price"),
+            }
+        )
+        return result[ODDS_COLUMNS]
     return load_csv_with_columns(path, ODDS_COLUMNS)

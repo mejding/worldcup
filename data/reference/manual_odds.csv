@@ -1,1 +1,1 @@
-match_id,event_id,commence_time,home_team,away_team,bookmaker_key,bookmaker_title,market_key,outcome_name,outcome_price,source,source_last_checked
+match_id,home_team,away_team,kickoff_utc,bookmaker,home_odds,draw_odds,away_odds,odds_last_updated_utc,bookmaker_key,is_danske_spil,source,notes

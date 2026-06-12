@@ -81,13 +81,12 @@ from config import (
     MODEL_PATH,
     MODEL_PREDICTIONS_PATH,
     MODEL_SOURCE,
-    ODDS_API_MARKET,
-    ODDS_API_ODDS_FORMAT,
-    ODDS_API_REGION,
+    ODDS_API_MARKETS,
+    ODDS_API_REGIONS,
     ODDS_API_SPORT_KEY,
     ODDS_SNAPSHOT_PATH,
     PREFERRED_BOOKMAKER,
-    PREFERRED_BOOKMAKER_NAMES,
+    PROCESSED_ODDS_PATH,
     REFERENCE_FIXTURES_PATH,
     SAMPLE_PREDICTIONS_PATH,
     STAKING_PROFILES,
@@ -108,14 +107,13 @@ from draw_features import add_draw_context_features
 from draw_hypothesis import run_draw_hypothesis_analysis
 from ensemble import apply_ensemble_to_upcoming_matches
 from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
-from fetch_fixtures import fetch_worldcup_fixtures
-from fetch_odds import append_odds_snapshot, fetch_odds_from_api, load_manual_odds
 from fixture_data import fixture_provenance, load_fixture_dataset, validate_fixture_dataset
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
-from live_data_pipeline import build_live_predictions
+from live_data_pipeline import refresh_live_odds_and_predictions
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status
+from odds_provider import get_odds_source_status
 from odds_utils import calculate_edge
 from probability_sources import (
     PROBABILITY_SOURCE_LABELS,
@@ -125,7 +123,7 @@ from probability_sources import (
 )
 from predict_model import predict_upcoming_matches
 from recommendations import add_recommendations
-from time_utils import add_danish_kickoff_column
+from time_utils import add_danish_kickoff_column, format_danish_kickoff
 from tooltip_definitions import TOOLTIPS
 from train_model import train_historical_model
 from ui_theme import apply_custom_theme
@@ -893,15 +891,46 @@ def odds_availability_message(df: pd.DataFrame) -> Optional[str]:
     )
     if has_best_odds:
         return None
-    manual_freshness = get_data_freshness(MANUAL_ODDS_PATH)
-    if not get_secret_or_env("ODDS_API_KEY"):
-        if manual_freshness["row_count"] > 0:
-            return "Oddsfilen har rækker, men live predictions er ikke bygget endnu. Kør Import manual odds under Advanced / Admin."
-        return "Odds findes på markedet, men appen mangler en datakilde: tilføj ODDS_API_KEY i Streamlit secrets eller udfyld data/reference/manual_odds.csv."
+    status = get_odds_source_status()
+    if status["active_odds_source"] == "missing":
+        return status["warning"]
+    if status["active_odds_source"] == "api":
+        return "The Odds API er konfigureret, men der er ikke bygget odds til kampene endnu. Kør Refresh odds now under Advanced / Admin."
+    if status["active_odds_source"] == "manual":
+        return "Manual odds CSV er fundet. Kør Refresh odds now under Advanced / Admin for at bygge kampodds."
+    if status["active_odds_source"] == "cached":
+        return "Cached odds snapshot findes. Kør Refresh odds now under Advanced / Admin for at bruge seneste cache."
     live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
     if not live_freshness["file_exists"] or live_freshness["row_count"] == 0:
-        return "Odds API key er sat, men live odds er ikke hentet endnu. Kør Fetch latest odds eller Import manual odds under Advanced / Admin."
+        return "Odds source er konfigureret, men live odds er ikke bygget endnu. Kør Refresh odds now under Advanced / Admin."
     return "Live predictions er indlæst, men ingen 1X2-odds matchede fixtures. Tjek odds-providerens sport key/regions og bookmaker coverage."
+
+
+def odds_provenance_text(df: pd.DataFrame) -> str:
+    if st.session_state.active_data_mode == "sample":
+        return "Odds: Sample/demo odds - not real bookmaker odds."
+    if "odds_available" in df.columns and pd.to_numeric(df["odds_available"], errors="coerce").fillna(False).astype(bool).any():
+        priced = df[pd.to_numeric(df["odds_available"], errors="coerce").fillna(False).astype(bool)]
+        source = str(priced["odds_source"].dropna().iloc[0]) if "odds_source" in priced.columns and not priced["odds_source"].dropna().empty else "unknown"
+        provider = str(priced["odds_provider"].dropna().iloc[0]) if "odds_provider" in priced.columns and not priced["odds_provider"].dropna().empty else source
+        bookmaker_count = int(pd.to_numeric(priced.get("bookmaker_count", pd.Series([0])), errors="coerce").max())
+        updated = ""
+        if "odds_last_updated_utc" in priced.columns and not priced["odds_last_updated_utc"].dropna().empty:
+            updated = f" · updated {format_danish_kickoff(priced['odds_last_updated_utc'].dropna().iloc[0])}"
+        label = {
+            "api": "The Odds API",
+            "manual_csv": "Manual CSV",
+            "cached_snapshot": "Cached snapshot",
+        }.get(source, provider)
+        return f"Odds: {label} · {bookmaker_count} bookmakers{updated}"
+    status = get_odds_source_status()
+    if status["active_odds_source"] == "manual":
+        return "Odds: Manual CSV configured · refresh required"
+    if status["active_odds_source"] == "cached":
+        return "Odds: Cached snapshot available · refresh required"
+    if status["active_odds_source"] == "api":
+        return "Odds: The Odds API configured · refresh required"
+    return "Odds missing"
 
 
 def compact_match_card(row) -> None:
@@ -943,6 +972,7 @@ def page_overview(df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
     st.caption(fixture_provenance_text(st.session_state.active_data_mode, df))
+    st.caption(odds_provenance_text(df))
     if st.session_state.active_data_mode == "sample":
         st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
     if df.empty:
@@ -2111,96 +2141,53 @@ def page_settings() -> None:
         horizontal=True,
     )
     st.session_state.data_mode = mode_labels[selected_mode_label]
-    api_key_configured = bool(get_secret_or_env("ODDS_API_KEY"))
     live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
     fixture_freshness = get_data_freshness(REFERENCE_FIXTURES_PATH)
     manual_odds_freshness = get_data_freshness(MANUAL_ODDS_PATH)
+    processed_odds_freshness = get_data_freshness(PROCESSED_ODDS_PATH)
+    odds_status = get_odds_source_status()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         metric_card("Current mode", st.session_state.data_mode.title())
     with c2:
         metric_card("Fixture rows", str(fixture_freshness["row_count"]))
     with c3:
-        metric_card("API key", "Configured" if api_key_configured else "Missing")
+        metric_card("Odds source", odds_status["active_odds_source"].title())
     with c4:
-        metric_card("Manual odds rows", str(manual_odds_freshness["row_count"]))
+        metric_card("Latest odds rows", str(processed_odds_freshness["row_count"]))
     st.caption(fixture_provenance_text(st.session_state.data_mode))
     if st.session_state.data_mode == "sample":
         st.warning("Sample/demo data is for testing UI only and is not official World Cup fixture data.")
     if st.session_state.data_mode == "live" and not live_freshness["file_exists"]:
         st.warning("Live predictions are missing. The app will show no live matches until fixtures/odds are fetched; sample fallback is disabled.")
+    st.subheader("Odds data")
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("Active source", odds_status["active_odds_source"].title())
+    o2.metric("API key", "Configured" if odds_status["has_api_key"] else "Missing")
+    o3.metric("Manual CSV", "Valid" if odds_status["manual_odds_valid"] else ("Present" if odds_status["manual_odds_exists"] else "Missing"))
+    o4.metric("Cached snapshot", "Available" if odds_status["cached_odds_exists"] else "Missing")
+    st.caption(f"Sport key: {ODDS_API_SPORT_KEY} · regions: {ODDS_API_REGIONS} · markets: {ODDS_API_MARKETS}")
     st.caption(f"Manual odds file: {MANUAL_ODDS_PATH}")
-    odds_action_1, odds_action_2 = st.columns(2)
-    with odds_action_1:
-        import_manual_odds = st.button("Import manual odds")
-    with odds_action_2:
-        fetch_latest_odds = st.button("Fetch latest odds from API")
+    if odds_status["warning"]:
+        st.warning(odds_status["warning"])
+    elif odds_status["message"]:
+        st.info(odds_status["message"])
+    if odds_status["last_error"]:
+        st.caption(f"Status detail: {odds_status['last_error']}")
 
-    if import_manual_odds:
-        try:
-            fixtures_df = fetch_worldcup_fixtures()
-            odds_df = load_manual_odds(MANUAL_ODDS_PATH, fixtures_df=fixtures_df)
-            if odds_df.empty:
-                st.error(
-                    "Manual odds file is empty or incomplete. Add one row per 1X2 outcome with match_id, bookmaker, outcome_name and outcome_price."
-                )
-            else:
-                append_odds_snapshot(odds_df, ODDS_SNAPSHOT_PATH)
-                live_df = build_live_predictions(
-                    odds_df,
-                    fixtures_df=fixtures_df,
-                    preferred_bookmaker_names=PREFERRED_BOOKMAKER_NAMES,
-                )
-                live_warnings, live_errors = validate_predictions(live_df)
-                if live_errors:
-                    for error in live_errors:
-                        st.error(error)
-                else:
-                    for warning in live_warnings:
-                        st.warning(warning)
-                    st.session_state.data_mode = "live"
-                    st.success(f"Manual odds imported. Built {len(live_df)} app-ready matches.")
-                    st.rerun()
-        except Exception as exc:
-            st.error(f"Could not import manual odds: {exc}")
-
-    if fetch_latest_odds:
-        api_key = get_secret_or_env("ODDS_API_KEY")
-        if not api_key:
-            st.error("ODDS_API_KEY is not configured. Add it via environment variable or Streamlit secrets.")
-        else:
-            try:
-                odds_df = fetch_odds_from_api(
-                    api_key=api_key,
-                    sport_key=ODDS_API_SPORT_KEY,
-                    region=ODDS_API_REGION,
-                    market=ODDS_API_MARKET,
-                    odds_format=ODDS_API_ODDS_FORMAT,
-                )
-                if odds_df.empty:
-                    st.warning("Odds API returned no odds. Keeping current data mode.")
-                else:
-                    append_odds_snapshot(odds_df, ODDS_SNAPSHOT_PATH)
-                    fixtures_df = fetch_worldcup_fixtures(odds_df=odds_df)
-                    live_df = build_live_predictions(
-                        odds_df,
-                        fixtures_df=fixtures_df,
-                        preferred_bookmaker_names=PREFERRED_BOOKMAKER_NAMES,
-                    )
-                    live_warnings, live_errors = validate_predictions(live_df)
-                    if live_errors:
-                        for error in live_errors:
-                            st.error(error)
-                    else:
-                        for warning in live_warnings:
-                            st.warning(warning)
-                        st.session_state.data_mode = "live"
-                        st.success(f"Live odds fetched. Built {len(live_df)} app-ready matches.")
-                        st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error(f"Could not fetch live odds: {exc}")
+    if st.button("Refresh odds now"):
+        result = refresh_live_odds_and_predictions(force_refresh=True)
+        for warning in result.get("warnings", []):
+            st.warning(warning)
+        if result.get("last_error"):
+            st.warning(result["last_error"])
+        st.session_state.data_mode = "live"
+        st.success(
+            f"Odds refresh completed via {result['active_odds_source']}. "
+            f"{result['matches_with_odds']} / {result['matches_total']} matches have odds."
+        )
+        with st.expander("Provider metadata", expanded=True):
+            st.json(result)
 
     st.divider()
     st.subheader("Model source")

@@ -14,7 +14,9 @@ REFERENCE_DATA_DIR = DATA_DIR / "reference"
 SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
 REFERENCE_FIXTURES_PATH = REFERENCE_DATA_DIR / "worldcup_2026_fixtures.csv"
 MANUAL_ODDS_PATH = REFERENCE_DATA_DIR / "manual_odds.csv"
+MANUAL_ODDS_EXAMPLE_PATH = REFERENCE_DATA_DIR / "manual_odds.example.csv"
 LIVE_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "live_predictions.csv"
+PROCESSED_ODDS_PATH = PROCESSED_DATA_DIR / "latest_odds.csv"
 MODEL_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "model_predictions.csv"
 LIVE_PREDICTIONS_WITH_MODEL_PATH = PROCESSED_DATA_DIR / "live_predictions_with_model.csv"
 TRAINING_DATASET_PATH = PROCESSED_DATA_DIR / "training_dataset.csv"
@@ -49,6 +51,7 @@ BANKROLL_HISTORY_PATH = DATA_DIR / "bankroll_history.csv"
 BET_LOG_PATH = DATA_DIR / "bet_log.csv"
 FIXTURES_SNAPSHOT_PATH = RAW_DATA_DIR / "fixtures_snapshots.csv"
 ODDS_SNAPSHOT_PATH = RAW_DATA_DIR / "odds_snapshots.csv"
+RAW_ODDS_SNAPSHOT_PATH = ODDS_SNAPSHOT_PATH
 
 BANKROLL_STATE_EXAMPLE_PATH = DATA_DIR / "bankroll_state.example.json"
 BANKROLL_HISTORY_EXAMPLE_PATH = DATA_DIR / "bankroll_history.example.csv"
@@ -65,9 +68,13 @@ DEFAULT_ENSEMBLE_W_MODEL = 0.2
 
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 ODDS_API_SPORT_KEY = "soccer_fifa_world_cup"
-ODDS_API_REGION = "eu"
-ODDS_API_MARKET = "h2h"
+ODDS_API_REGIONS = "eu"
+ODDS_API_MARKETS = "h2h"
 ODDS_API_ODDS_FORMAT = "decimal"
+ODDS_API_DATE_FORMAT = "iso"
+ODDS_REFRESH_MINUTES = 30
+ODDS_API_REGION = ODDS_API_REGIONS
+ODDS_API_MARKET = ODDS_API_MARKETS
 PREFERRED_BOOKMAKER_NAMES = ["Danske Spil", "DanskeSpil", "Danske Spil A/S", "danske_spil"]
 
 STAKING_PROFILES = {
