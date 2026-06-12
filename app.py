@@ -86,6 +86,7 @@ from config import (
     ODDS_API_SPORT_KEY,
     ODDS_SNAPSHOT_PATH,
     PREFERRED_BOOKMAKER,
+    PREFERRED_BOOKMAKER_NAMES,
     PROCESSED_ODDS_PATH,
     REFERENCE_FIXTURES_PATH,
     SAMPLE_PREDICTIONS_PATH,
@@ -112,6 +113,7 @@ from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import refresh_live_odds_and_predictions
+from match_results import add_match_results, split_active_and_archived_matches
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status
 from odds_provider import get_odds_source_status
 from odds_utils import calculate_edge
@@ -279,6 +281,7 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
         warnings.extend(predictions.attrs.get("warnings", []))
     except ValueError as exc:
         return predictions, warnings, [str(exc)]
+    predictions = add_match_results(predictions)
     bankroll = load_bankroll_state()["current_bankroll"]
     enriched = add_recommendations(predictions, bankroll, current_profile())
     return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors
@@ -782,6 +785,7 @@ def show_sidebar() -> None:
     ret = net / state["starting_bankroll"] if state["starting_bankroll"] else 0
     pages = [
         "Match Overview",
+        "Match Archive",
         "Betting Center",
         "My Bets",
         "Match Detail",
@@ -839,7 +843,7 @@ def show_sidebar() -> None:
 
 def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
     unique_warnings = list(dict.fromkeys(str(warning) for warning in warnings))
-    normal_pages = {"Match Overview", "Betting Center", "My Bets", "Match Detail"}
+    normal_pages = {"Match Overview", "Match Archive", "Betting Center", "My Bets", "Match Detail"}
     if unique_warnings and st.session_state.page in normal_pages:
         user_facing = [
             warning for warning in unique_warnings
@@ -964,6 +968,7 @@ def compact_match_card(row) -> None:
 
 
 def page_overview(df: pd.DataFrame) -> None:
+    active_df, archived_df = split_active_and_archived_matches(df)
     st.markdown(
         """
         <div class="wc-hero-title">VM 2026 Prediction & Kelly</div>
@@ -972,14 +977,17 @@ def page_overview(df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
     st.caption(fixture_provenance_text(st.session_state.active_data_mode, df))
-    st.caption(odds_provenance_text(df))
+    st.caption(odds_provenance_text(active_df))
+    if not archived_df.empty:
+        st.caption(f"{len(archived_df)} afviklede kampe er flyttet til Match Archive.")
     if st.session_state.active_data_mode == "sample":
         st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
-    if df.empty:
+    if active_df.empty:
         empty_state(
-            "No matches loaded. Official/live mode did not load prediction rows. Check the fixture reference and live odds pipeline in Admin / Settings."
+            "No upcoming matches loaded. Completed matches are available in Match Archive."
         )
         return
+    df = active_df
     counts = df["recommendation_status"].value_counts()
     kpi_cols = st.columns(6)
     with kpi_cols[0]:
@@ -1138,8 +1146,11 @@ def render_ds_no_bet_row(row) -> None:
 
 
 def page_betting_center(df: pd.DataFrame) -> None:
+    df, archived = split_active_and_archived_matches(df)
     st.title("Betting Center")
     st.caption("Alt omkring spilforslag, bet slip, bankroll og bet history samlet ét sted.")
+    if not archived.empty:
+        st.caption(f"{len(archived)} afviklede kampe er flyttet til Match Archive og er ikke spilbare her.")
     value_tab, ds_tab, best_tab, slip_tab, bankroll_tab, history_tab = st.tabs(
         ["Value bets", "Danske Spil", "Best market", "Bet slip", "Bankroll", "Bet history"]
     )
@@ -1331,6 +1342,70 @@ def page_match_detail(df: pd.DataFrame) -> None:
     with st.expander("Odds and Kelly details"):
         st.dataframe(odds_comparison_table(row), width="stretch", hide_index=True)
         st.dataframe(style_edge_table(outcome_kelly_table(row)), width="stretch", hide_index=True)
+
+
+def format_archive_table(df: pd.DataFrame) -> pd.DataFrame:
+    display = df.copy()
+    display["match"] = display["home_team"].astype(str) + " vs " + display["away_team"].astype(str)
+    columns = [
+        "kickoff_time_dk",
+        "group",
+        "matchday",
+        "match",
+        "full_time_score",
+        "favorite_outcome_label",
+        "actual_outcome_label",
+        "favorite_result_status",
+        "result_source",
+    ]
+    rename = {
+        "kickoff_time_dk": "Kickoff DK",
+        "group": "Group",
+        "matchday": "MD",
+        "full_time_score": "Resultat",
+        "favorite_outcome_label": "Favorit",
+        "actual_outcome_label": "Udfald",
+        "favorite_result_status": "Status",
+        "result_source": "Kilde",
+    }
+    return display[[column for column in columns if column in display.columns]].rename(columns=rename)
+
+
+def page_match_archive(df: pd.DataFrame) -> None:
+    _, archived = split_active_and_archived_matches(df)
+    st.title("Match Archive")
+    st.caption("Afviklede kampe flyttes hertil, så Match Overview kun viser kommende kampe.")
+    if archived.empty:
+        empty_state("Ingen afviklede kampe i arkivet endnu.")
+        return
+
+    favorite_hits = int((archived["favorite_result_status"] == "Favoritten gik hjem").sum())
+    surprises = int((archived["favorite_result_status"] == "Overraskelse").sum())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Afviklede kampe", str(len(archived)))
+    c2.metric("Favoritten gik hjem", str(favorite_hits))
+    c3.metric("Overraskelser", str(surprises))
+
+    for _, row in archived.sort_values("kickoff_time").iterrows():
+        status_class = "wc-status-green" if row["favorite_result_status"] == "Favoritten gik hjem" else "wc-status-amber"
+        st.markdown(
+            f"""
+            <div class="wc-match-compact">
+              <div class="wc-match-main">
+                <div>
+                  <div class="wc-match-title">{html.escape(match_label(row))}</div>
+                  <div class="wc-match-meta">{html.escape(str(row.get('kickoff_time_dk', row['kickoff_time'])))} · Group {html.escape(str(row['group']))} · MD {html.escape(str(row['matchday']))}</div>
+                </div>
+                <div class="{status_class} wc-match-status">{html.escape(str(row['favorite_result_status']))}</div>
+              </div>
+              <div class="wc-match-line"><b>Resultat:</b> {html.escape(str(row['full_time_score']))} · <b>Favorit:</b> {html.escape(str(row['favorite_outcome_label']))} · <b>Udfald:</b> {html.escape(str(row['actual_outcome_label']))}</div>
+              <div class="wc-match-reason">Kilde: {html.escape(str(row.get('result_source', '-')))} · checked: {html.escape(str(row.get('result_last_checked_utc', '-')))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.dataframe(format_archive_table(archived), width="stretch", hide_index=True)
 
 
 def page_bankroll() -> None:
@@ -2425,6 +2500,8 @@ show_validation_messages(validation_warnings, validation_errors)
 
 if st.session_state.page == "Match Overview":
     page_overview(df)
+elif st.session_state.page == "Match Archive":
+    page_match_archive(df)
 elif st.session_state.page == "Betting Center":
     page_betting_center(df)
 elif st.session_state.page == "My Bets":
