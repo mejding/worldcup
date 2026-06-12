@@ -83,6 +83,19 @@ def apply_custom_theme() -> None:
         }
         .wc-match-reason { color: var(--wc-muted); }
         .wc-match-status { white-space: nowrap; font-size: 0.8rem; line-height: 1.2; }
+        @media (max-width: 900px) {
+            .stApp:has([data-testid="stSidebar"][aria-expanded="true"]) .block-container {
+                padding-left: calc(256px + 0.75rem);
+                padding-right: 0.75rem;
+            }
+            .wc-match-main {
+                flex-direction: column;
+                gap: 0.25rem;
+            }
+            .wc-match-status {
+                white-space: normal;
+            }
+        }
         section.main h1, section.main h2, section.main h3 { letter-spacing: 0; }
         button[kind="primary"], .stButton button { border-radius: 7px; }
         </style>

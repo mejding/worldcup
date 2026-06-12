@@ -131,7 +131,12 @@ from train_model import train_historical_model
 from ui_theme import apply_custom_theme
 
 
-st.set_page_config(page_title="VM 2026 Prediction & Kelly", page_icon="⚽", layout="wide")
+st.set_page_config(
+    page_title="VM 2026 Prediction & Kelly",
+    page_icon="⚽",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 apply_custom_theme()
 ensure_runtime_data_files()
 
