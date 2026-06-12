@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from config import REQUIRED_PREDICTION_COLUMNS
@@ -97,3 +98,25 @@ def test_placeholder_draw_context_fields_are_present(tmp_path):
     assert row["draw_context_score"] == 50
     assert row["draw_context_label"] == "Medium"
     assert row["one_team_must_win"] == False
+
+
+def test_odds_events_match_official_fixtures_by_teams_and_date(tmp_path):
+    fixtures = pd.DataFrame(
+        [
+            {
+                "match_id": "WC2026-GRA-001",
+                "kickoff_utc": "2026-06-11T19:00:00Z",
+                "group": "A",
+                "matchday": 1,
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+            }
+        ]
+    )
+
+    df = build_live_predictions(_odds_df(), fixtures_df=fixtures, output_path=tmp_path / "live.csv")
+
+    assert len(df) == 1
+    assert df.iloc[0]["match_id"] == "WC2026-GRA-001"
+    assert df.iloc[0]["fixture_source"] == "official_reference"
+    assert df.iloc[0]["group"] == "A"

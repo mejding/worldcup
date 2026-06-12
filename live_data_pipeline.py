@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from pathlib import Path
 from typing import Optional, Union
 
@@ -14,6 +16,43 @@ from odds_mapping import (
 )
 
 
+TEAM_ALIASES = {
+    "usa": "unitedstates",
+    "us": "unitedstates",
+    "unitedstatesofamerica": "unitedstates",
+    "turkiye": "turkiye",
+    "turkey": "turkiye",
+    "iran": "iriran",
+    "islamicrepublicofiran": "iriran",
+    "drcongo": "congodr",
+    "democraticrepublicofcongo": "congodr",
+    "ivorycoast": "cotedivoire",
+    "curacao": "curacao",
+    "capeverde": "caboverde",
+    "southkorea": "southkorea",
+    "korearepublic": "southkorea",
+    "republicofkorea": "southkorea",
+}
+
+
+def _normalize_team_name(value) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    text = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return TEAM_ALIASES.get(text, text)
+
+
+def _fixture_signature(home_team, away_team) -> tuple[str, str]:
+    return (_normalize_team_name(home_team), _normalize_team_name(away_team))
+
+
+def _fixture_date(value) -> str:
+    timestamp = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(timestamp):
+        return ""
+    return timestamp.date().isoformat()
+
+
 def _complete_event_ids(odds_df: pd.DataFrame) -> set:
     canonical = add_canonical_outcome(odds_df)
     complete = set()
@@ -26,9 +65,32 @@ def _complete_event_ids(odds_df: pd.DataFrame) -> set:
 
 def _fixture_lookup(fixtures_df: Optional[pd.DataFrame]) -> dict:
     if fixtures_df is None or fixtures_df.empty:
-        return {}
-    key = "match_id" if "match_id" in fixtures_df.columns else "event_id"
-    return {row[key]: row for _, row in fixtures_df.iterrows()}
+        return {"by_id": {}, "by_signature_date": {}, "by_signature": {}}
+    id_key = "match_id" if "match_id" in fixtures_df.columns else "event_id"
+    by_id = {}
+    by_signature_date = {}
+    by_signature = {}
+    for _, row in fixtures_df.iterrows():
+        by_id[row[id_key]] = row
+        signature = _fixture_signature(row.get("home_team"), row.get("away_team"))
+        by_signature.setdefault(signature, row)
+        by_signature_date[(signature, _fixture_date(row.get("kickoff_utc", row.get("kickoff_time"))))] = row
+    return {
+        "by_id": by_id,
+        "by_signature_date": by_signature_date,
+        "by_signature": by_signature,
+    }
+
+
+def _match_fixture(row, fixtures: dict):
+    fixture = fixtures["by_id"].get(row["event_id"])
+    if fixture is not None:
+        return fixture
+    signature = _fixture_signature(row.get("home_team"), row.get("away_team"))
+    dated = fixtures["by_signature_date"].get((signature, _fixture_date(row.get("commence_time"))))
+    if dated is not None:
+        return dated
+    return fixtures["by_signature"].get(signature)
 
 
 def _empty_prediction_columns() -> list[str]:
@@ -78,7 +140,7 @@ def build_live_predictions(
 
     rows_by_match_id = {}
     for _, row in merged.iterrows():
-        fixture = fixtures.get(row["event_id"])
+        fixture = _match_fixture(row, fixtures)
         match_id = fixture.get("match_id", row["event_id"]) if fixture is not None else row["event_id"]
         rows_by_match_id[match_id] = (
             {
