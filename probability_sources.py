@@ -68,6 +68,52 @@ def _normalize_active(result: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def _has_priced_odds(df: pd.DataFrame) -> pd.Series:
+    best_columns = ["best_home_odds", "best_draw_odds", "best_away_odds"]
+    ds_columns = ["ds_home_odds", "ds_draw_odds", "ds_away_odds"]
+    result = pd.Series(False, index=df.index)
+    for columns in [best_columns, ds_columns]:
+        if all(column in df.columns for column in columns):
+            odds = df[columns].apply(pd.to_numeric, errors="coerce")
+            result = result | odds.gt(1.0).all(axis=1)
+    return result
+
+
+def _triplet_is_uniform(df: pd.DataFrame, prefix: str) -> pd.Series:
+    columns = [f"{prefix}_home_prob", f"{prefix}_draw_prob", f"{prefix}_away_prob"]
+    if not all(column in df.columns for column in columns):
+        return pd.Series(False, index=df.index)
+    values = df[columns].apply(pd.to_numeric, errors="coerce")
+    return values.sub(1 / 3).abs().lt(0.0001).all(axis=1)
+
+
+def _replace_unpriced_market_placeholders(result: pd.DataFrame, source: str, requested: str) -> pd.DataFrame:
+    if source != "best_validated" or requested != "market":
+        return result
+    model_columns = get_probability_columns("historical_model")
+    if not _columns_available(result, model_columns):
+        return result
+
+    use_model = (
+        ~_has_priced_odds(result)
+        & _triplet_is_uniform(result, "market")
+        & _triplet_is_uniform(result, "active")
+        & ~_triplet_is_uniform(result, "model")
+    )
+    if not use_model.any():
+        return result
+
+    result.loc[use_model, "active_home_prob"] = pd.to_numeric(result.loc[use_model, model_columns["home"]], errors="coerce")
+    result.loc[use_model, "active_draw_prob"] = pd.to_numeric(result.loc[use_model, model_columns["draw"]], errors="coerce")
+    result.loc[use_model, "active_away_prob"] = pd.to_numeric(result.loc[use_model, model_columns["away"]], errors="coerce")
+    result.loc[use_model, "active_probability_source"] = "historical_model"
+    result.loc[use_model, "probability_source_warning"] = "Market odds unavailable. Using historical model for this match."
+    result.attrs.setdefault("warnings", []).append(
+        "Market odds are unavailable for some fixtures. Best validated source uses the historical model for those matches."
+    )
+    return result
+
+
 def resolve_probability_source(source: str) -> dict:
     if source == "best_validated":
         return load_active_probability_source()
@@ -102,7 +148,13 @@ def apply_probability_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
     result["active_away_prob"] = pd.to_numeric(result[columns["away"]], errors="coerce")
     result = _normalize_active(result)
     result["active_probability_source"] = requested
+    result = _replace_unpriced_market_placeholders(result, source, requested)
+    result = _normalize_active(result)
+    warnings.extend(warning for warning in result.attrs.get("warnings", []) if warning not in warnings)
     if warnings:
-        result["probability_source_warning"] = "; ".join(warnings)
+        if "probability_source_warning" not in result.columns:
+            result["probability_source_warning"] = ""
+        empty_warning = result["probability_source_warning"].fillna("").eq("")
+        result.loc[empty_warning, "probability_source_warning"] = "; ".join(warnings)
     result.attrs["warnings"] = warnings
     return result

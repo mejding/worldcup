@@ -3,6 +3,19 @@ import plotly.express as px
 import streamlit as st
 
 
+def _match_has_priced_odds(match_row) -> bool:
+    odds_sets = [
+        ["best_home_odds", "best_draw_odds", "best_away_odds"],
+        ["ds_home_odds", "ds_draw_odds", "ds_away_odds"],
+    ]
+    for columns in odds_sets:
+        if all(column in match_row.index for column in columns):
+            values = [pd.to_numeric(match_row.get(column), errors="coerce") for column in columns]
+            if all(not pd.isna(value) and float(value) > 1.0 for value in values):
+                return True
+    return False
+
+
 def probability_comparison_chart(df: pd.DataFrame):
     if not isinstance(df, pd.DataFrame):
         row = df
@@ -181,6 +194,7 @@ def probability_source_comparison_chart(comparison_df: pd.DataFrame):
 
 
 def active_vs_market_model_chart(match_row):
+    has_priced_odds = _match_has_priced_odds(match_row)
     sources = [
         ("Market", "market"),
         ("Historical model", "model"),
@@ -190,6 +204,8 @@ def active_vs_market_model_chart(match_row):
     ]
     rows = []
     for label, prefix in sources:
+        if prefix == "market" and not has_priced_odds:
+            continue
         columns = [f"{prefix}_home_prob", f"{prefix}_draw_prob", f"{prefix}_away_prob"]
         if all(column in match_row.index and not pd.isna(match_row[column]) for column in columns):
             for outcome, column in zip(["Home", "Draw", "Away"], columns):

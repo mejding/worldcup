@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+import probability_sources
 from probability_sources import (
     apply_probability_source,
     get_probability_columns,
@@ -42,6 +43,37 @@ def test_unavailable_source_falls_back_to_market():
     result = apply_probability_source(_df(), "draw_context_model")
 
     assert result.iloc[0]["active_probability_source"] == "historical_model"
+    assert result.attrs["warnings"]
+
+
+def test_best_validated_uses_model_when_market_is_unpriced_placeholder(monkeypatch):
+    monkeypatch.setattr(
+        probability_sources,
+        "load_active_probability_source",
+        lambda: {"source": "best_validated", "resolved_source": "market"},
+    )
+    df = pd.DataFrame(
+        {
+            "market_home_prob": [1 / 3],
+            "market_draw_prob": [1 / 3],
+            "market_away_prob": [1 / 3],
+            "model_home_prob": [0.45],
+            "model_draw_prob": [0.30],
+            "model_away_prob": [0.25],
+            "best_home_odds": [pd.NA],
+            "best_draw_odds": [pd.NA],
+            "best_away_odds": [pd.NA],
+            "ds_home_odds": [pd.NA],
+            "ds_draw_odds": [pd.NA],
+            "ds_away_odds": [pd.NA],
+        }
+    )
+
+    result = apply_probability_source(df, "best_validated")
+
+    assert result.iloc[0]["active_probability_source"] == "historical_model"
+    assert result.iloc[0]["active_home_prob"] == pytest.approx(0.45)
+    assert result.iloc[0]["active_draw_prob"] == pytest.approx(0.30)
     assert result.attrs["warnings"]
 
 

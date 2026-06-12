@@ -358,7 +358,48 @@ def no_bet_reason(row, market: str) -> str:
     return "No outcome passes both edge and Kelly thresholds."
 
 
+def row_has_priced_odds(row) -> bool:
+    odds_sets = [
+        ["best_home_odds", "best_draw_odds", "best_away_odds"],
+        ["ds_home_odds", "ds_draw_odds", "ds_away_odds"],
+    ]
+    for columns in odds_sets:
+        values = [pd.to_numeric(row.get(column), errors="coerce") for column in columns]
+        if all(not pd.isna(value) and float(value) > 1.0 for value in values):
+            return True
+    return False
+
+
+def _probability_triplet_is_uniform(row, prefix: str) -> bool:
+    values = [
+        pd.to_numeric(row.get(f"{prefix}_home_prob"), errors="coerce"),
+        pd.to_numeric(row.get(f"{prefix}_draw_prob"), errors="coerce"),
+        pd.to_numeric(row.get(f"{prefix}_away_prob"), errors="coerce"),
+    ]
+    if any(pd.isna(value) for value in values):
+        return False
+    return all(abs(float(value) - (1 / 3)) < 0.0001 for value in values)
+
+
+def row_has_displayable_probabilities(row) -> bool:
+    if row_has_priced_odds(row):
+        return True
+    return not (
+        _probability_triplet_is_uniform(row, "market")
+        and _probability_triplet_is_uniform(row, "model")
+        and _probability_triplet_is_uniform(row, "active")
+    )
+
+
+def format_probability_for_row(row, column: str) -> str:
+    if not row_has_displayable_probabilities(row):
+        return "-"
+    return format_probability(row.get(column))
+
+
 def probability_source_label(row) -> str:
+    if not row_has_displayable_probabilities(row):
+        return "Afventer odds/model"
     source = row.get("active_probability_source", st.session_state.probability_source)
     label = PROBABILITY_SOURCE_LABELS.get(source, source)
     if source == "ensemble" and not pd.isna(row.get("ensemble_w_market")):
@@ -367,6 +408,11 @@ def probability_source_label(row) -> str:
 
 
 def match_prediction_summary(row) -> dict:
+    if not row_has_displayable_probabilities(row):
+        return {
+            "favorite": "Afventer odds",
+            "line": "Sandsynligheder mangler",
+        }
     probabilities = {
         row["home_team"]: probability_for_outcome(row, "home"),
         "Draw": probability_for_outcome(row, "draw"),
@@ -649,22 +695,23 @@ def style_edge_table(df: pd.DataFrame):
     edge_columns = ["DS edge", "Best edge"]
 
     def color_edge(value):
-        color = "green" if float(value) > 0 else "red"
+        numeric_value = pd.to_numeric(value, errors="coerce")
+        color = "green" if not pd.isna(numeric_value) and float(numeric_value) > 0 else "red"
         return f"color: {color}"
 
     return df.style.format(
         {
-            "Model probability": "{:.1%}",
-            "DS odds": "{:.2f}",
-            "DS edge": "{:.2%}",
-            "DS full Kelly": "{:.2%}",
-            "DS fractional Kelly": "{:.2%}",
-            "DS suggested stake": "{:.2f} DKK",
-            "Best odds": "{:.2f}",
-            "Best edge": "{:.2%}",
-            "Best full Kelly": "{:.2%}",
-            "Best fractional Kelly": "{:.2%}",
-            "Best suggested stake": "{:.2f} DKK",
+            "Model probability": format_probability,
+            "DS odds": format_odds,
+            "DS edge": format_percentage,
+            "DS full Kelly": format_percentage,
+            "DS fractional Kelly": format_percentage,
+            "DS suggested stake": format_dkk,
+            "Best odds": format_odds,
+            "Best edge": format_percentage,
+            "Best full Kelly": format_percentage,
+            "Best fractional Kelly": format_percentage,
+            "Best suggested stake": format_dkk,
         }
     ).map(color_edge, subset=edge_columns)
 
@@ -697,9 +744,20 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
             "draw_context_label": "Draw context",
         }
     )
-    for column in ["Active H", "Active U", "Active A", "Model H", "Model U", "Model A"]:
-        if column in display_df.columns:
-            display_df[column] = display_df[column].map(format_percentage)
+    probability_display_columns = {
+        "Active H": "active_home_prob",
+        "Active U": "active_draw_prob",
+        "Active A": "active_away_prob",
+        "Model H": "model_home_prob",
+        "Model U": "model_draw_prob",
+        "Model A": "model_away_prob",
+    }
+    for display_column, source_column in probability_display_columns.items():
+        if display_column in display_df.columns:
+            display_df[display_column] = df.apply(
+                lambda row: format_probability_for_row(row, source_column),
+                axis=1,
+            )
     for column in ["DS H", "DS U", "DS A", "Best H", "Best U", "Best A"]:
         display_df[column] = display_df[column].map(format_odds)
     for column in ["Stake DS", "Stake Best"]:
@@ -1151,20 +1209,24 @@ def page_match_detail(df: pd.DataFrame) -> None:
     with h3:
         metric_card("Betting decision", row["recommendation_status"], betting_decision_summary(row))
 
-    prob_df = pd.DataFrame(
-        {
+    has_displayable_probabilities = row_has_displayable_probabilities(row)
+    if has_displayable_probabilities:
+        probability_columns = {
             "Outcome": ["Home", "Draw", "Away"],
             "Model": [row["model_home_prob"], row["model_draw_prob"], row["model_away_prob"]],
-            "Market": [row["market_home_prob"], row["market_draw_prob"], row["market_away_prob"]],
             "Active": [
                 row.get("active_home_prob", row["model_home_prob"]),
                 row.get("active_draw_prob", row["model_draw_prob"]),
                 row.get("active_away_prob", row["model_away_prob"]),
             ],
         }
-    )
-    if "ensemble_home_prob" in row.index:
-        prob_df["Ensemble"] = [row.get("ensemble_home_prob"), row.get("ensemble_draw_prob"), row.get("ensemble_away_prob")]
+        if row_has_priced_odds(row):
+            probability_columns["Market"] = [row["market_home_prob"], row["market_draw_prob"], row["market_away_prob"]]
+        prob_df = pd.DataFrame(probability_columns)
+        if "ensemble_home_prob" in row.index:
+            prob_df["Ensemble"] = [row.get("ensemble_home_prob"), row.get("ensemble_draw_prob"), row.get("ensemble_away_prob")]
+    else:
+        prob_df = pd.DataFrame()
 
     st.subheader("Betting decision")
     c1, c2 = st.columns(2)
@@ -1221,13 +1283,20 @@ def page_match_detail(df: pd.DataFrame) -> None:
 
     with st.expander("Advanced probability details"):
         st.caption(f"Active recommendation source: {probability_source_label(row)}")
-        c1, c2 = st.columns([1, 1.2])
-        c1.dataframe(
-            prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
-            width="stretch",
-            hide_index=True,
-        )
-        c2.plotly_chart(active_vs_market_model_chart(row), width="stretch")
+        if not has_displayable_probabilities:
+            empty_state("Sandsynligheder afventer odds eller en modelkørsel. 33/33/33-placeholders vises ikke som rigtige prognoser.")
+        else:
+            c1, c2 = st.columns([1, 1.2])
+            c1.dataframe(
+                prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
+                width="stretch",
+                hide_index=True,
+            )
+            chart = active_vs_market_model_chart(row)
+            if chart is None:
+                c2.info("Ingen sandsynlighedsdata at vise endnu.")
+            else:
+                c2.plotly_chart(chart, width="stretch")
 
     with st.expander("Odds and Kelly details"):
         st.dataframe(odds_comparison_table(row), width="stretch", hide_index=True)
