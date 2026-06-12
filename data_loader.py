@@ -19,6 +19,7 @@ from config import (
     MODEL_PREDICTIONS_PATH,
     ODDS_SNAPSHOT_PATH,
     PROCESSED_DATA_DIR,
+    REFERENCE_FIXTURES_PATH,
     RAW_DATA_DIR,
     REQUIRED_PREDICTION_COLUMNS,
     SAMPLE_PREDICTIONS_PATH,
@@ -26,6 +27,12 @@ from config import (
 from backtest_paths import REPORTS_DIR
 from bankroll import BANKROLL_HISTORY_COLUMNS, DEFAULT_BANKROLL_STATE, save_bankroll_state
 from bet_log import BET_LOG_COLUMNS
+from fixture_data import (
+    build_predictions_from_fixtures,
+    load_fixture_dataset,
+    validate_fixture_dataset,
+    validate_prediction_fixture_consistency,
+)
 from probability_sources import apply_probability_source
 from time_utils import add_danish_kickoff_column
 
@@ -88,11 +95,6 @@ def validate_predictions(df: pd.DataFrame) -> tuple[list[str], list[str]]:
         )
         return warnings, errors
 
-    invalid_odds_columns = [column for column in best_odds_columns if numeric_df[column].isna().any()]
-    if invalid_odds_columns:
-        errors.append("Invalid odds columns: " + ", ".join(invalid_odds_columns))
-        return warnings, errors
-
     model_sums = numeric_df[["model_home_prob", "model_draw_prob", "model_away_prob"]].sum(axis=1)
     market_sums = numeric_df[["market_home_prob", "market_draw_prob", "market_away_prob"]].sum(axis=1)
     if not model_sums.sub(1.0).abs().le(0.001).all():
@@ -100,8 +102,11 @@ def validate_predictions(df: pd.DataFrame) -> tuple[list[str], list[str]]:
     if not market_sums.sub(1.0).abs().le(0.001).all():
         warnings.append("Market probabilities do not sum to 1.0 for every match.")
 
-    if not (numeric_df[best_odds_columns] > 1.0).all().all():
+    best_available = numeric_df[best_odds_columns].notna().all(axis=1)
+    if best_available.any() and not (numeric_df.loc[best_available, best_odds_columns] > 1.0).all().all():
         errors.append("Best market odds values must be numeric and greater than 1.0.")
+    if (~best_available).any():
+        warnings.append("Best market odds are unavailable for one or more matches.")
     ds_available = numeric_df[ds_odds_columns].notna().all(axis=1)
     if ds_available.any() and not (numeric_df.loc[ds_available, ds_odds_columns] > 1.0).all().all():
         warnings.append("One or more available Danske Spil odds values are not greater than 1.0.")
@@ -189,8 +194,13 @@ def load_predictions_by_mode(
     model_source: str = "market_only",
     model_predictions_path: Union[str, Path] = MODEL_PREDICTIONS_PATH,
     live_with_model_path: Union[str, Path] = LIVE_PREDICTIONS_WITH_MODEL_PATH,
+    fixtures_path: Union[str, Path] = REFERENCE_FIXTURES_PATH,
 ) -> tuple[pd.DataFrame, list[str], str]:
     warnings = []
+    mode = mode if mode in {"official", "sample", "live"} else "official"
+    fixtures_df = load_fixture_dataset(fixtures_path)
+    _, fixture_messages = validate_fixture_dataset(fixtures_df)
+
     if model_source in {"historical_model", "historical_model_if_available"}:
         candidate = Path(live_with_model_path if mode == "live" else model_predictions_path)
         if candidate.exists() and candidate.stat().st_size > 0:
@@ -198,6 +208,22 @@ def load_predictions_by_mode(
                 model_df = add_danish_kickoff_column(pd.read_csv(candidate))
                 model_warnings, model_errors = validate_predictions(model_df)
                 if not model_errors:
+                    if mode != "sample":
+                        consistency_warnings = validate_prediction_fixture_consistency(model_df, fixtures_df)
+                        blocking_consistency = any(
+                            marker in warning
+                            for warning in consistency_warnings
+                            for marker in [
+                                "sample fixtures",
+                                "does not exist in fixture source",
+                                "teams do not match",
+                                "kickoff is stale",
+                            ]
+                        )
+                        if blocking_consistency:
+                            warnings.extend(consistency_warnings)
+                            raise ValueError("Model predictions do not match fixture source.")
+                        warnings.extend(consistency_warnings)
                     warnings.extend(model_warnings)
                     return model_df, warnings, mode
             except Exception:
@@ -210,27 +236,36 @@ def load_predictions_by_mode(
 
     if mode == "sample":
         df = load_predictions(sample_path)
+        df["kickoff_utc"] = df["kickoff_time"]
+        df["fixture_source"] = "sample_demo"
         if model_source in {"market_only", "historical_model_if_available", "historical_model"}:
             df = _use_market_as_model(df)
         return df, warnings, "sample"
-    if mode != "live":
-        warnings.append(f"Unknown data mode '{mode}', falling back to sample data.")
-        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
+
+    if mode == "official":
+        warnings.extend(fixture_messages)
+        official_df = build_predictions_from_fixtures(fixtures_df, fixture_source="official_reference")
+        return official_df, warnings, "official"
 
     live_path = Path(live_path)
     if not live_path.exists() or live_path.stat().st_size == 0:
-        warnings.append("Live predictions are missing. Falling back to sample data.")
-        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
+        warnings.append("Live predictions are missing. No sample fallback was used.")
+        warnings.extend(fixture_messages)
+        return pd.DataFrame(columns=REQUIRED_PREDICTION_COLUMNS), warnings, "live"
     try:
         live_df = add_danish_kickoff_column(pd.read_csv(live_path))
     except (EmptyDataError, pd.errors.ParserError):
-        warnings.append("Live predictions are empty or malformed. Falling back to sample data.")
-        return _use_market_as_model(load_predictions(sample_path)), warnings, "sample"
+        warnings.append("Live predictions are empty or malformed. No sample fallback was used.")
+        warnings.extend(fixture_messages)
+        return pd.DataFrame(columns=REQUIRED_PREDICTION_COLUMNS), warnings, "live"
     live_warnings, live_errors = validate_predictions(live_df)
     if live_errors:
         warnings.extend(live_warnings)
-        warnings.append("Live predictions are invalid. Falling back to sample data.")
-        return load_predictions(sample_path), warnings, "sample"
+        warnings.append("Live predictions are invalid. No sample fallback was used.")
+        warnings.extend(live_errors)
+        warnings.extend(validate_prediction_fixture_consistency(live_df, fixtures_df))
+        return pd.DataFrame(columns=REQUIRED_PREDICTION_COLUMNS), warnings, "live"
+    warnings.extend(validate_prediction_fixture_consistency(live_df, fixtures_df))
     warnings.extend(live_warnings)
     if model_source in {"market_only", "historical_model_if_available", "historical_model"}:
         live_df = _use_market_as_model(live_df)

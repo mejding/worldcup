@@ -55,7 +55,9 @@ def test_build_live_predictions_returns_required_schema(tmp_path):
 
     df = build_live_predictions(_odds_df(), output_path=output)
 
-    assert list(df.columns) == REQUIRED_PREDICTION_COLUMNS
+    assert list(df[REQUIRED_PREDICTION_COLUMNS].columns) == REQUIRED_PREDICTION_COLUMNS
+    assert "kickoff_utc" in df.columns
+    assert "fixture_source" in df.columns
     assert output.exists()
 
 

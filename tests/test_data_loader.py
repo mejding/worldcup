@@ -1,7 +1,7 @@
 import pandas as pd
 
 from config import REQUIRED_PREDICTION_COLUMNS
-from data_loader import load_predictions, validate_predictions
+from data_loader import load_predictions, load_predictions_by_mode, validate_predictions
 
 
 def _valid_predictions() -> pd.DataFrame:
@@ -88,3 +88,48 @@ def test_detect_invalid_odds():
 
     assert warnings == []
     assert "Best market odds values must be numeric and greater than 1.0." in errors
+
+
+def test_live_mode_does_not_fall_back_to_sample_when_live_file_is_missing(tmp_path):
+    sample_path = tmp_path / "sample_predictions.csv"
+    _valid_predictions().to_csv(sample_path, index=False)
+
+    df, warnings, actual_mode = load_predictions_by_mode(
+        "live",
+        sample_path=sample_path,
+        live_path=tmp_path / "missing_live.csv",
+        model_source="market_only",
+    )
+
+    assert actual_mode == "live"
+    assert df.empty
+    assert any("No sample fallback" in warning for warning in warnings)
+
+
+def test_sample_mode_is_explicit_and_marked_as_demo(tmp_path):
+    sample_path = tmp_path / "sample_predictions.csv"
+    _valid_predictions().to_csv(sample_path, index=False)
+
+    df, warnings, actual_mode = load_predictions_by_mode(
+        "sample",
+        sample_path=sample_path,
+        model_source="market_only",
+    )
+
+    assert actual_mode == "sample"
+    assert warnings == []
+    assert set(df["fixture_source"]) == {"sample_demo"}
+    assert set(df["kickoff_utc"]) == {"2026-06-11T20:00:00Z"}
+
+
+def test_official_mode_uses_reference_fixtures_not_sample_data():
+    df, warnings, actual_mode = load_predictions_by_mode("official", model_source="market_only")
+
+    assert actual_mode == "official"
+    assert any("incomplete" in warning.lower() for warning in warnings)
+    assert ((df["home_team"] == "Canada") & (df["away_team"] == "Bosnia and Herzegovina")).any()
+    assert not (
+        (df["home_team"] == "Canada")
+        & (df["away_team"] == "Switzerland")
+        & df["kickoff_utc"].astype(str).str.startswith("2026-06-12")
+    ).any()

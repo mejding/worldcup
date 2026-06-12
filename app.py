@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pandas as pd
 import streamlit as st
 
@@ -67,6 +69,7 @@ from backtest_paths import (
     PROCESSED_DATA_DIR,
 )
 from config import (
+    DATA_MODE,
     DEFAULT_ENSEMBLE_W_MARKET,
     DEFAULT_PROFILE_NAME,
     DEFAULT_PROBABILITY_SOURCE,
@@ -83,6 +86,7 @@ from config import (
     ODDS_SNAPSHOT_PATH,
     PREFERRED_BOOKMAKER,
     PREFERRED_BOOKMAKER_NAMES,
+    REFERENCE_FIXTURES_PATH,
     SAMPLE_PREDICTIONS_PATH,
     STAKING_PROFILES,
     TRAINING_DATASET_PATH,
@@ -104,6 +108,7 @@ from ensemble import apply_ensemble_to_upcoming_matches
 from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
 from fetch_fixtures import fetch_worldcup_fixtures
 from fetch_odds import append_odds_snapshot, fetch_odds_from_api
+from fixture_data import fixture_provenance, load_fixture_dataset
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
@@ -141,9 +146,9 @@ def init_session_state() -> None:
     if "selected_match_id" not in st.session_state:
         st.session_state.selected_match_id = None
     if "data_mode" not in st.session_state:
-        st.session_state.data_mode = "sample"
+        st.session_state.data_mode = DATA_MODE
     if "active_data_mode" not in st.session_state:
-        st.session_state.active_data_mode = "sample"
+        st.session_state.active_data_mode = DATA_MODE
     if "model_source" not in st.session_state:
         st.session_state.model_source = MODEL_SOURCE
     if "active_model_source" not in st.session_state:
@@ -194,7 +199,12 @@ def prepare_best_available_predictions() -> list[str]:
         output_path = LIVE_PREDICTIONS_WITH_MODEL_PATH if actual_mode == "live" else MODEL_PREDICTIONS_PATH
         should_generate = not output_path.exists() or output_path.stat().st_size == 0
         if not should_generate:
-            source_path = LIVE_PREDICTIONS_PATH if actual_mode == "live" else SAMPLE_PREDICTIONS_PATH
+            if actual_mode == "live":
+                source_path = LIVE_PREDICTIONS_PATH
+            elif actual_mode == "sample":
+                source_path = SAMPLE_PREDICTIONS_PATH
+            else:
+                source_path = REFERENCE_FIXTURES_PATH
             should_generate = output_path.stat().st_mtime < max(
                 source_path.stat().st_mtime if source_path.exists() else 0,
                 MODEL_PATH.stat().st_mtime,
@@ -432,7 +442,7 @@ def app_health_rows(df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         bankroll_loaded = False
     checks = [
-        ("Data mode", st.session_state.active_data_mode.title(), "Sample uses static data; live requires fetched odds."),
+        ("Data mode", st.session_state.active_data_mode.title(), fixture_provenance_text(st.session_state.active_data_mode, df)),
         ("Matches loaded", str(len(df)), "Upcoming matches available in the current app mode."),
         ("Active probability source", PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source), "Used for edge and Kelly."),
         ("Model available", "Yes" if model_status["model_exists"] else "No", "Train/apply model in Settings if needed."),
@@ -635,9 +645,15 @@ def show_sidebar() -> None:
     st.sidebar.caption(f"Minimum stake: {format_percentage(profile['min_stake_pct_threshold'])}")
     st.sidebar.divider()
     st.sidebar.markdown("**Data mode**")
-    mode_path = LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
+    if st.session_state.active_data_mode == "live":
+        mode_path = LIVE_PREDICTIONS_PATH
+    elif st.session_state.active_data_mode == "sample":
+        mode_path = SAMPLE_PREDICTIONS_PATH
+    else:
+        mode_path = REFERENCE_FIXTURES_PATH
     freshness = get_data_freshness(mode_path)
     st.sidebar.caption(f"Mode: {st.session_state.active_data_mode.title()}")
+    st.sidebar.caption(fixture_provenance_text(st.session_state.active_data_mode))
     st.sidebar.caption(f"Prediction source: {PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)}")
     st.sidebar.caption(f"Rows: {freshness['row_count']}")
     st.sidebar.caption(f"Updated: {freshness['last_modified'] or '-'}")
@@ -658,6 +674,16 @@ def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
         st.stop()
 
 
+def fixture_provenance_text(mode: str, df: Optional[pd.DataFrame] = None) -> str:
+    source_df = load_fixture_dataset() if mode != "sample" else (df if df is not None else pd.DataFrame())
+    provenance = fixture_provenance(source_df, mode)
+    return (
+        f"Fixture source: {provenance['label']} | "
+        f"{provenance['loaded']} / {provenance['expected']} matches | "
+        f"checked: {provenance['last_checked']}"
+    )
+
+
 def page_overview(df: pd.DataFrame) -> None:
     st.markdown(
         """
@@ -666,6 +692,14 @@ def page_overview(df: pd.DataFrame) -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(fixture_provenance_text(st.session_state.active_data_mode, df))
+    if st.session_state.active_data_mode == "sample":
+        st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
+    if df.empty:
+        empty_state(
+            "No matches loaded. Official/live mode did not load prediction rows. Check the fixture reference and live odds pipeline in Admin / Settings."
+        )
+        return
     counts = df["recommendation_status"].value_counts()
     kpi_cols = st.columns(6)
     with kpi_cols[0]:
@@ -1530,24 +1564,37 @@ def page_settings() -> None:
         "Normal users do not need this page. The app automatically uses the best available predictions and falls back to market probabilities when model files are unavailable."
     )
     st.subheader("Data mode")
+    mode_labels = {
+        "Official fixtures": "official",
+        "Sample/demo data": "sample",
+        "Live odds data": "live",
+    }
+    current_label = next(
+        label for label, value in mode_labels.items()
+        if value == st.session_state.data_mode
+    )
     selected_mode_label = st.radio(
         "Choose data source",
-        ["Sample data", "Live odds data"],
-        index=0 if st.session_state.data_mode == "sample" else 1,
+        list(mode_labels.keys()),
+        index=list(mode_labels.keys()).index(current_label),
         horizontal=True,
     )
-    st.session_state.data_mode = "sample" if selected_mode_label == "Sample data" else "live"
+    st.session_state.data_mode = mode_labels[selected_mode_label]
     api_key_configured = bool(get_secret_or_env("ODDS_API_KEY"))
     live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
+    fixture_freshness = get_data_freshness(REFERENCE_FIXTURES_PATH)
     c1, c2, c3 = st.columns(3)
     with c1:
         metric_card("Current mode", st.session_state.data_mode.title())
     with c2:
-        metric_card("Live rows", str(live_freshness["row_count"]))
+        metric_card("Fixture rows", str(fixture_freshness["row_count"]))
     with c3:
         metric_card("API key", "Configured" if api_key_configured else "Missing")
+    st.caption(fixture_provenance_text(st.session_state.data_mode))
+    if st.session_state.data_mode == "sample":
+        st.warning("Sample/demo data is for testing UI only and is not official World Cup fixture data.")
     if st.session_state.data_mode == "live" and not live_freshness["file_exists"]:
-        st.warning("Live predictions are missing. The app will fall back to sample data until odds are fetched.")
+        st.warning("Live predictions are missing. The app will show no live matches until fixtures/odds are fetched; sample fallback is disabled.")
     if st.button("Fetch latest odds"):
         api_key = get_secret_or_env("ODDS_API_KEY")
         if not api_key:
@@ -1806,8 +1853,9 @@ def page_about(df: pd.DataFrame) -> None:
     st.dataframe(app_health_rows(df), width="stretch", hide_index=True)
     with st.expander("If the app feels incomplete"):
         st.write(
-            "Check whether you are in sample mode, whether live odds have been fetched, whether the historical model "
-            "has been trained and applied, and whether an ensemble has been selected as the active probability source."
+            "Check whether official, sample or live mode is active, whether the fixture reference is complete, "
+            "whether live odds have been fetched, whether the historical model has been trained and applied, "
+            "and whether an ensemble has been selected as the active probability source."
         )
 
 

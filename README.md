@@ -10,14 +10,17 @@ Streamlit MVP for a World Cup 2026 prediction and Kelly staking workflow.
 - Optional live odds ingestion via The Odds API or a compatible h2h odds provider
 - Local bankroll tracking
 - Bet log, settlement and double-settlement protection
-- Streamlit dashboard with sample World Cup 2026 group-stage data
+- Streamlit dashboard with an official-reference fixture layer, explicit sample/demo mode and optional live odds
 - Historical model training and time-based backtesting
 
 ## MVP Limitations
 
-- Sample mode uses `data/sample_predictions.csv`; live mode can generate `data/processed/live_predictions.csv` from odds API data.
+- Official mode is the default and reads fixtures from `data/reference/worldcup_2026_fixtures.csv`.
+- The bundled reference is currently marked incomplete: 5 of 104 expected World Cup matches are loaded. The UI shows this provenance instead of pretending the schedule is complete.
+- Sample mode uses `data/sample_predictions.csv` only when explicitly selected in `Admin / Settings`; it is demo data and not an official fixture schedule.
+- Live mode can generate `data/processed/live_predictions.csv` from the official fixture reference plus odds API data. It does not silently fall back to sample data if live predictions are missing.
 - In sample mode, model probabilities, Danske Spil odds and best market odds are sample inputs.
-- In live mode, model probabilities can use market-implied probabilities or saved historical model predictions.
+- In live/official mode, model probabilities can use market-implied probabilities or saved historical model predictions when they match the fixture reference.
 - Draw-context is explanatory only in this MVP.
 - Backtesting evaluates model probability quality only. It does not evaluate historical betting P/L because historical odds are not included yet.
 - Bankroll and bet log are stored as local CSV/JSON files.
@@ -93,6 +96,18 @@ The app is designed so normal users do not need to train or apply models manuall
 
 Manual retraining, model application, backtests, draw-context analysis, ensemble comparison and odds refresh are admin/developer actions under `Admin / Settings`, `Backtest & Metrics`, `Draw Hypothesis` and `Ensemble`.
 
+## Fixture Data
+
+Fixture data has a separate source-of-truth file:
+
+```text
+data/reference/worldcup_2026_fixtures.csv
+```
+
+Required fixture columns include `match_id`, `match_number`, `kickoff_utc`, `kickoff_local`, `kickoff_timezone`, teams, group/stage/matchday, city/stadium and source metadata. The validator checks required columns, duplicate match IDs, parseable kickoff times, completeness against 104 expected matches and known Group B corrections.
+
+Known correction covered by tests: Canada vs Bosnia and Herzegovina is on 2026-06-12, Group B, Toronto Stadium. Canada vs Switzerland must not appear on 2026-06-12.
+
 ## Draw-Context
 
 Draw-context is not draw probability and not a betting recommendation. It is a contextual signal for whether a draw may be strategically plausible. High draw-context should prompt a closer look at draw probability, draw odds and draw edge, but never a draw bet by itself.
@@ -105,7 +120,8 @@ Raw `kickoff_time` values are preserved for data compatibility, but visible kick
 
 Check `About` -> `Health check`:
 
-- whether sample or live data is active
+- whether official, sample or live data is active
+- whether the fixture source is complete or explicitly marked incomplete
 - whether live odds have been fetched
 - whether a historical model is trained and applied
 - whether ensemble predictions exist
@@ -145,10 +161,10 @@ Do not commit `.env` or `.streamlit/secrets.toml`.
    - branch: `main`
    - main file path: `app.py`
 5. Deploy.
-6. No secrets are needed for this MVP.
-7. For future live odds, add `ODDS_API_KEY` via Streamlit secrets.
+6. No secrets are needed for official fixture mode or sample/demo mode.
+7. For live odds, add `ODDS_API_KEY` via Streamlit secrets.
 
-The MVP uses sample data only and does not require API keys.
+The default deployed mode uses the fixture reference file and does not require API keys.
 
 ## Runtime Data Files
 
@@ -172,11 +188,11 @@ Live odds mode also writes runtime files that are ignored by git:
 - `data/raw/fixtures_snapshots.csv`
 - `data/processed/live_predictions.csv`
 
-Raw odds snapshots are appended. Processed live predictions are regenerated into the same schema as `data/sample_predictions.csv`.
+Raw odds snapshots are appended. Processed live predictions are regenerated into the prediction schema plus fixture provenance columns such as `kickoff_utc` and `fixture_source`.
 
 ## Streamlit Secrets
 
-No secrets are required for sample data mode.
+No secrets are required for official fixture mode or sample/demo mode.
 
 Live odds mode requires `ODDS_API_KEY`.
 
@@ -220,7 +236,7 @@ Because the historical ML model has not been added yet, live mode sets:
 - `model_draw_prob = market_draw_prob`
 - `model_away_prob = market_away_prob`
 
-Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app will still work with best market odds where possible, and it falls back to sample data if live data is unavailable or invalid.
+Odds APIs may not include Danske Spil or all World Cup fixtures at all times. The app keeps official fixtures visible where possible and shows missing odds as `No bet`; it does not silently replace live/official data with sample fixtures.
 
 ## Historical Model
 
@@ -410,9 +426,10 @@ Example:
 ## Troubleshooting
 
 - If Streamlit Cloud says the app is not connected to GitHub, push the current branch to a GitHub repository and select that repository in Streamlit Cloud.
-- If the app cannot find `sample_predictions.csv`, confirm that `data/sample_predictions.csv` is committed.
+- If the app cannot find official fixtures, confirm that `data/reference/worldcup_2026_fixtures.csv` is committed.
+- If sample/demo mode fails, confirm that `data/sample_predictions.csv` is committed.
 - If bankroll or bet-log files are missing, restart the app; runtime files are recreated automatically.
 - If live odds mode says `ODDS_API_KEY` is missing, add it via environment variable or Streamlit secrets.
-- If the odds API returns no events, rate limits or omits draw odds, the app keeps sample/current data and shows a warning.
+- If the odds API returns no events, rate limits or omits draw odds, the app keeps official fixture rows where possible and shows a warning.
 - If a bet cannot be settled, check that it is still pending. Double settlement is intentionally blocked.
-- If the app shows sample-data validation errors, fix `data/sample_predictions.csv` and redeploy.
+- If the app shows sample-data validation errors, fix `data/sample_predictions.csv` before using demo mode.

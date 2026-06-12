@@ -1,3 +1,5 @@
+import pandas as pd
+
 from config import DEFAULT_STAKING_PROFILE
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from odds_utils import calculate_edge
@@ -23,8 +25,8 @@ def _probability_for_outcome(row, outcome: str) -> float:
 
 def _build_candidate(row, outcome: str, odds_prefix: str, current_bankroll: float, profile: dict):
     probability = _probability_for_outcome(row, outcome)
-    odds = float(row[f"{odds_prefix}_{outcome}_odds"])
-    if odds != odds or odds <= 1:
+    odds = pd.to_numeric(row.get(f"{odds_prefix}_{outcome}_odds"), errors="coerce")
+    if pd.isna(odds) or odds <= 1:
         candidate = {
             "outcome": _outcome_label(outcome),
             "odds": None,
@@ -36,8 +38,9 @@ def _build_candidate(row, outcome: str, odds_prefix: str, current_bankroll: floa
             "is_valid": False,
         }
         if odds_prefix == "best":
-            candidate["bookmaker"] = row[f"best_{outcome}_bookmaker"]
+            candidate["bookmaker"] = row.get(f"best_{outcome}_bookmaker")
         return candidate
+    odds = float(odds)
     edge = calculate_edge(probability, odds)
     kelly_values = calculate_final_stake_fraction(
         probability,
@@ -60,7 +63,7 @@ def _build_candidate(row, outcome: str, odds_prefix: str, current_bankroll: floa
     }
 
     if odds_prefix == "best":
-        candidate["bookmaker"] = row[f"best_{outcome}_bookmaker"]
+        candidate["bookmaker"] = row.get(f"best_{outcome}_bookmaker")
 
     return candidate
 

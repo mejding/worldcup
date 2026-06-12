@@ -1,0 +1,6 @@
+match_id,match_number,kickoff_utc,kickoff_local,kickoff_timezone,home_team,away_team,group,stage,matchday,city,stadium,source,source_last_checked,is_complete,expected_match_count
+WC2026-GRB-001,3,2026-06-12T19:00:00Z,2026-06-12 15:00,America/Toronto,Canada,Bosnia and Herzegovina,B,Group stage,1,Toronto,Toronto Stadium,FIFA match schedule; verified against public schedule listings,2026-06-12,False,104
+WC2026-GRB-002,12,2026-06-13T00:00:00Z,2026-06-13 00:00,America/Los_Angeles,Qatar,Switzerland,B,Group stage,1,San Francisco Bay Area,San Francisco Bay Area Stadium,FIFA match schedule; verified against public schedule listings,2026-06-12,False,104
+WC2026-GRB-003,27,2026-06-18T22:00:00Z,2026-06-18 15:00,America/Vancouver,Canada,Qatar,B,Group stage,2,Vancouver,BC Place Vancouver,FIFA match schedule; verified against public schedule listings,2026-06-12,False,104
+WC2026-GRB-004,28,2026-06-19T00:00:00Z,2026-06-18 17:00,America/Los_Angeles,Switzerland,Bosnia and Herzegovina,B,Group stage,2,Los Angeles,Los Angeles Stadium,FIFA match schedule; verified against public schedule listings,2026-06-12,False,104
+WC2026-GRB-005,49,2026-06-24T19:00:00Z,2026-06-24 12:00,America/Vancouver,Canada,Switzerland,B,Group stage,3,Vancouver,BC Place Vancouver,FIFA match schedule; verified against public schedule listings,2026-06-12,False,104

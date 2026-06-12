@@ -9,8 +9,10 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 HISTORICAL_DATA_DIR = DATA_DIR / "historical"
 MODELS_DIR = DATA_DIR / "models"
 REPORTS_DIR = DATA_DIR / "reports"
+REFERENCE_DATA_DIR = DATA_DIR / "reference"
 
 SAMPLE_PREDICTIONS_PATH = DATA_DIR / "sample_predictions.csv"
+REFERENCE_FIXTURES_PATH = REFERENCE_DATA_DIR / "worldcup_2026_fixtures.csv"
 LIVE_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "live_predictions.csv"
 MODEL_PREDICTIONS_PATH = PROCESSED_DATA_DIR / "model_predictions.csv"
 LIVE_PREDICTIONS_WITH_MODEL_PATH = PROCESSED_DATA_DIR / "live_predictions_with_model.csv"
@@ -51,8 +53,8 @@ BANKROLL_STATE_EXAMPLE_PATH = DATA_DIR / "bankroll_state.example.json"
 BANKROLL_HISTORY_EXAMPLE_PATH = DATA_DIR / "bankroll_history.example.csv"
 BET_LOG_EXAMPLE_PATH = DATA_DIR / "bet_log.example.csv"
 
-DATA_MODE_OPTIONS = ("sample", "live")
-DATA_MODE = "sample"
+DATA_MODE_OPTIONS = ("official", "sample", "live")
+DATA_MODE = "official"
 MODEL_SOURCE_OPTIONS = ("market_only", "historical_model", "historical_model_if_available")
 MODEL_SOURCE = "historical_model_if_available"
 PROBABILITY_SOURCE_OPTIONS = ("best_validated", "market", "historical_model", "draw_context_model", "ensemble")
