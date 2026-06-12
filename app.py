@@ -108,7 +108,7 @@ from ensemble import apply_ensemble_to_upcoming_matches
 from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
 from fetch_fixtures import fetch_worldcup_fixtures
 from fetch_odds import append_odds_snapshot, fetch_odds_from_api
-from fixture_data import fixture_provenance, load_fixture_dataset
+from fixture_data import fixture_provenance, load_fixture_dataset, validate_fixture_dataset
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
@@ -136,7 +136,7 @@ ensure_runtime_data_files()
 
 def init_session_state() -> None:
     if "page" not in st.session_state:
-        st.session_state.page = "Overview"
+        st.session_state.page = "Match Overview"
     if "kelly_profile_name" not in st.session_state:
         st.session_state.kelly_profile_name = DEFAULT_PROFILE_NAME
     if "staking_profile" not in st.session_state:
@@ -161,6 +161,8 @@ def init_session_state() -> None:
         st.session_state.ensemble_w_market = DEFAULT_ENSEMBLE_W_MARKET
     if "ensemble_model_variant" not in st.session_state:
         st.session_state.ensemble_model_variant = "historical_model"
+    if "bet_slip" not in st.session_state:
+        st.session_state.bet_slip = []
 
 
 def current_profile() -> dict:
@@ -490,38 +492,147 @@ def add_recommended_bet(row, market: str) -> None:
         st.error(str(exc))
 
 
+def recommended_market(row) -> str:
+    if row.get("recommended_outcome_ds") != "No bet":
+        return "ds"
+    if row.get("recommended_outcome_best") != "No bet":
+        return "best"
+    return "none"
+
+
+def bet_payload_from_recommendation(row, market: str) -> dict:
+    if market == "ds":
+        outcome = row["recommended_outcome_ds"]
+        bookmaker = "Danske Spil"
+    else:
+        outcome = row["recommended_outcome_best"]
+        bookmaker = row["recommended_bookmaker_best"]
+    outcome_key = {"Home": "home", "Draw": "draw", "Away": "away"}[outcome]
+    return {
+        "match_id": row["match_id"],
+        "match": match_label(row),
+        "kickoff_time_dk": row.get("kickoff_time_dk", ""),
+        "bookmaker": bookmaker,
+        "outcome": outcome,
+        "odds": row[f"recommended_odds_{market}"],
+        "model_probability": probability_for_outcome(row, outcome_key),
+        "edge": row[f"recommended_edge_{market}"],
+        "full_kelly": row[f"recommended_full_kelly_{market}"],
+        "fractional_kelly": row[f"recommended_fractional_kelly_{market}"],
+        "stake_dkk": row[f"recommended_stake_{market}"],
+        "market": market,
+        "status": row["recommendation_status"],
+    }
+
+
+def add_recommendation_to_bet_slip(row, market: str) -> None:
+    outcome = row.get(f"recommended_outcome_{market}")
+    if outcome == "No bet" or pd.isna(outcome):
+        st.warning("Der er ingen gyldig anbefaling at tilføje.")
+        return
+    payload = bet_payload_from_recommendation(row, market)
+    slip_key = f"{payload['match_id']}|{payload['market']}|{payload['outcome']}|{payload['bookmaker']}"
+    existing_keys = {
+        f"{item['match_id']}|{item['market']}|{item['outcome']}|{item['bookmaker']}"
+        for item in st.session_state.bet_slip
+    }
+    if slip_key not in existing_keys:
+        st.session_state.bet_slip.append(payload)
+    st.success("Tilføjet til bet slip. Bankroll ændres ikke.")
+
+
+def commit_bet_slip_to_log() -> None:
+    added = 0
+    for item in st.session_state.bet_slip:
+        try:
+            add_bet(
+                match_id=item["match_id"],
+                match=item["match"],
+                kickoff_time_dk=item.get("kickoff_time_dk", ""),
+                bookmaker=item["bookmaker"],
+                outcome=item["outcome"],
+                odds=item["odds"],
+                model_probability=item["model_probability"],
+                edge=item["edge"],
+                full_kelly=item["full_kelly"],
+                fractional_kelly=item["fractional_kelly"],
+                stake_dkk=item["stake_dkk"],
+            )
+            added += 1
+        except ValueError as exc:
+            st.error(str(exc))
+    if added:
+        st.session_state.bet_slip = []
+        st.success(f"{added} bet(s) lagt i Bet Log. Bankroll ændres først ved settlement.")
+
+
+def format_bet_slip_table(items: list[dict]) -> pd.DataFrame:
+    if not items:
+        return pd.DataFrame()
+    df = pd.DataFrame(items)
+    display = df[["match", "kickoff_time_dk", "bookmaker", "outcome", "odds", "edge", "fractional_kelly", "stake_dkk", "status"]].copy()
+    display = display.rename(
+        columns={
+            "match": "Match",
+            "kickoff_time_dk": "Kickoff",
+            "bookmaker": "Bookmaker",
+            "outcome": "Outcome",
+            "odds": "Odds",
+            "edge": "Edge",
+            "fractional_kelly": "Kelly",
+            "stake_dkk": "Stake",
+            "status": "Status",
+        }
+    )
+    display["Odds"] = display["Odds"].map(format_odds)
+    display["Edge"] = display["Edge"].map(format_percentage)
+    display["Kelly"] = display["Kelly"].map(format_percentage)
+    display["Stake"] = display["Stake"].map(format_dkk)
+    return display
+
+
 def outcome_kelly_table(row) -> pd.DataFrame:
     rows = []
     profile = current_profile()
     bankroll = load_bankroll_state()["current_bankroll"]
     for outcome_key, outcome_name in [("home", "Home"), ("draw", "Draw"), ("away", "Away")]:
         model_probability = float(row.get(f"active_{outcome_key}_prob", row[f"model_{outcome_key}_prob"]))
-        ds_odds = float(row[f"ds_{outcome_key}_odds"])
-        best_odds = float(row[f"best_{outcome_key}_odds"])
-        ds_kelly = calculate_final_stake_fraction(
-            model_probability,
-            ds_odds,
-            profile["fractional_kelly_multiplier"],
-            profile["max_stake_pct_of_bankroll"],
+        ds_odds = pd.to_numeric(row.get(f"ds_{outcome_key}_odds"), errors="coerce")
+        best_odds = pd.to_numeric(row.get(f"best_{outcome_key}_odds"), errors="coerce")
+        ds_odds_for_calc = float(ds_odds) if pd.notna(ds_odds) and ds_odds > 1 else 1.0
+        best_odds_for_calc = float(best_odds) if pd.notna(best_odds) and best_odds > 1 else 1.0
+        ds_kelly = (
+            calculate_final_stake_fraction(
+                model_probability,
+                ds_odds_for_calc,
+                profile["fractional_kelly_multiplier"],
+                profile["max_stake_pct_of_bankroll"],
+            )
+            if ds_odds_for_calc > 1
+            else {"full_kelly": 0, "fractional_kelly": 0, "final_stake_fraction": 0}
         )
-        best_kelly = calculate_final_stake_fraction(
-            model_probability,
-            best_odds,
-            profile["fractional_kelly_multiplier"],
-            profile["max_stake_pct_of_bankroll"],
+        best_kelly = (
+            calculate_final_stake_fraction(
+                model_probability,
+                best_odds_for_calc,
+                profile["fractional_kelly_multiplier"],
+                profile["max_stake_pct_of_bankroll"],
+            )
+            if best_odds_for_calc > 1
+            else {"full_kelly": 0, "fractional_kelly": 0, "final_stake_fraction": 0}
         )
         rows.append(
             {
                 "Outcome": outcome_name,
                 "Model probability": model_probability,
-                "DS odds": ds_odds,
-                "DS edge": calculate_edge(model_probability, ds_odds),
+                "DS odds": ds_odds if pd.notna(ds_odds) else None,
+                "DS edge": calculate_edge(model_probability, ds_odds_for_calc) if ds_odds_for_calc > 1 else 0,
                 "DS full Kelly": ds_kelly["full_kelly"],
                 "DS fractional Kelly": ds_kelly["fractional_kelly"],
                 "DS suggested stake": calculate_suggested_stake(bankroll, ds_kelly["final_stake_fraction"]),
-                "Best odds": best_odds,
+                "Best odds": best_odds if pd.notna(best_odds) else None,
                 "Best bookmaker": row[f"best_{outcome_key}_bookmaker"],
-                "Best edge": calculate_edge(model_probability, best_odds),
+                "Best edge": calculate_edge(model_probability, best_odds_for_calc) if best_odds_for_calc > 1 else 0,
                 "Best full Kelly": best_kelly["full_kelly"],
                 "Best fractional Kelly": best_kelly["fractional_kelly"],
                 "Best suggested stake": calculate_suggested_stake(
@@ -612,19 +723,26 @@ def show_sidebar() -> None:
     net = state["current_bankroll"] - state["starting_bankroll"]
     ret = net / state["starting_bankroll"] if state["starting_bankroll"] else 0
     pages = [
-        "Overview",
+        "Match Overview",
+        "Betting Center",
+        "My Bets",
         "Match Detail",
-        "Bet Log",
-        "Bankroll",
-        "Analytics",
-        "About",
-        "Admin / Settings",
-        "Backtest & Metrics",
-        "Draw Hypothesis",
-        "Ensemble",
+        "Model & Data",
+        "Settings",
+        "Advanced / Admin",
     ]
-    if st.session_state.page == "Settings":
-        st.session_state.page = "Admin / Settings"
+    page_aliases = {
+        "Overview": "Match Overview",
+        "Bet Log": "My Bets",
+        "Bankroll": "My Bets",
+        "Analytics": "My Bets",
+        "About": "Model & Data",
+        "Admin / Settings": "Advanced / Admin",
+        "Backtest & Metrics": "Model & Data",
+        "Draw Hypothesis": "Model & Data",
+        "Ensemble": "Model & Data",
+    }
+    st.session_state.page = page_aliases.get(st.session_state.page, st.session_state.page)
     st.sidebar.title("Navigation")
     st.session_state.page = st.sidebar.radio(
         "Side",
@@ -662,12 +780,27 @@ def show_sidebar() -> None:
 
 
 def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
-    for warning in warnings:
-        text = str(warning)
-        if "fallback" in text.lower() or "market probabilities" in text.lower() or "market-implied" in text.lower():
-            st.info(text)
-        else:
-            st.warning(text)
+    unique_warnings = list(dict.fromkeys(str(warning) for warning in warnings))
+    normal_pages = {"Match Overview", "Betting Center", "My Bets", "Match Detail"}
+    if unique_warnings and st.session_state.page in normal_pages:
+        user_facing = [
+            warning for warning in unique_warnings
+            if "model unavailable" in warning.lower()
+            or "market-implied probabilities" in warning.lower()
+            or "market probabilities" in warning.lower()
+        ]
+        for warning in user_facing[:1]:
+            st.info("Predictions are currently based on market probabilities because the pre-trained model is unavailable or not applied.")
+        with st.expander("Data notes", expanded=False):
+            for warning in unique_warnings:
+                st.caption(warning)
+    else:
+        for warning in unique_warnings:
+            text = str(warning)
+            if "fallback" in text.lower() or "market probabilities" in text.lower() or "market-implied" in text.lower():
+                st.info(text)
+            else:
+                st.warning(text)
     for error in errors:
         st.error(error)
     if errors:
@@ -784,17 +917,17 @@ def page_overview(df: pd.DataFrame) -> None:
                 st.rerun()
             b1, b2 = st.columns(2)
             b1.button(
-                "Add DS recommendation",
+                "Add DS to bet slip",
                 key=f"add_ds_{row['match_id']}",
                 disabled=row["recommended_outcome_ds"] == "No bet",
-                on_click=add_recommended_bet,
+                on_click=add_recommendation_to_bet_slip,
                 args=(row, "ds"),
             )
             b2.button(
-                "Add best market recommendation",
+                "Add best market to bet slip",
                 key=f"add_best_{row['match_id']}",
                 disabled=row["recommended_outcome_best"] == "No bet",
-                on_click=add_recommended_bet,
+                on_click=add_recommendation_to_bet_slip,
                 args=(row, "best"),
             )
             if row["recommended_outcome_ds"] == "No bet" or row["recommended_outcome_best"] == "No bet":
@@ -831,7 +964,129 @@ def page_overview(df: pd.DataFrame) -> None:
     st.dataframe(format_overview_table(filtered[table_columns]), width="stretch", hide_index=True)
 
 
+def render_value_bet_card(row, market: str, key_suffix: str) -> None:
+    bookmaker = "Danske Spil" if market == "ds" else row.get("recommended_bookmaker_best")
+    status = "Playable at Danske Spil" if market == "ds" else row["recommendation_status"]
+    reason = (
+        "Danske Spil odds are high enough to create positive value."
+        if market == "ds"
+        else "Value exists at best market odds, but not at Danske Spil."
+    )
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 1])
+        c1.markdown(
+            f"**{recommendation_outcome_label(row, market)} @ {format_odds(row[f'recommended_odds_{market}'])} · {bookmaker}**"
+        )
+        c1.caption(f"{match_label(row)} · {row.get('kickoff_time_dk', row['kickoff_time'])}")
+        c1.caption(
+            f"Edge {format_percentage(row[f'recommended_edge_{market}'])} · "
+            f"Kelly {format_percentage(row[f'recommended_fractional_kelly_{market}'])} · "
+            f"Stake {format_dkk(row[f'recommended_stake_{market}'])}"
+        )
+        c1.caption(f"Reason: {reason}")
+        c2.markdown(status_badge(status), unsafe_allow_html=True)
+        c2.button(
+            "Add to bet slip",
+            key=f"slip_{market}_{key_suffix}_{row['match_id']}",
+            on_click=add_recommendation_to_bet_slip,
+            args=(row, market),
+        )
+        if c2.button("View match", key=f"view_{market}_{key_suffix}_{row['match_id']}"):
+            st.session_state.selected_match_id = row["match_id"]
+            st.session_state.page = "Match Detail"
+            st.rerun()
+
+
+def render_ds_no_bet_row(row) -> None:
+    note = "Better odds available elsewhere." if row["recommended_outcome_best"] != "No bet" else ""
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 1])
+        c1.markdown(f"**{match_label(row)}**")
+        c1.caption(f"{row.get('kickoff_time_dk', row['kickoff_time'])} · Reason: {no_bet_reason(row, 'ds')}")
+        if note:
+            c1.caption(note)
+        c2.markdown(status_badge("No bet"), unsafe_allow_html=True)
+
+
+def page_betting_center(df: pd.DataFrame) -> None:
+    st.title("Betting Center")
+    st.caption("Alt omkring spilforslag, bet slip, bankroll og bet history samlet ét sted.")
+    value_tab, ds_tab, best_tab, slip_tab, bankroll_tab, history_tab = st.tabs(
+        ["Value bets", "Danske Spil", "Best market", "Bet slip", "Bankroll", "Bet history"]
+    )
+
+    with value_tab:
+        value_df = df[df["recommendation_status"].isin(["Playable at Danske Spil", "Better elsewhere"])].copy()
+        if value_df.empty:
+            empty_state("No value bets found with the current thresholds. This means no available odds currently pass the edge and Kelly requirements.")
+        else:
+            value_df["sort_edge"] = value_df[["recommended_edge_ds", "recommended_edge_best"]].max(axis=1)
+            value_df["sort_stake"] = value_df[["recommended_stake_ds", "recommended_stake_best"]].max(axis=1)
+            value_df = value_df.sort_values(["sort_edge", "sort_stake", "kickoff_time"], ascending=[False, False, True])
+            for _, row in value_df.iterrows():
+                render_value_bet_card(row, recommended_market(row), "value")
+
+    with ds_tab:
+        st.subheader("Playable at Danske Spil")
+        playable = df[df["recommended_outcome_ds"] != "No bet"].copy()
+        if playable.empty:
+            empty_state("No bets are currently playable at Danske Spil.")
+        else:
+            playable = playable.sort_values(["recommended_edge_ds", "recommended_stake_ds", "kickoff_time"], ascending=[False, False, True])
+            for _, row in playable.iterrows():
+                render_value_bet_card(row, "ds", "ds")
+        st.subheader("No bet at Danske Spil")
+        no_ds = df[df["recommended_outcome_ds"] == "No bet"].copy()
+        if no_ds.empty:
+            empty_state("Every loaded match with odds currently has a Danske Spil recommendation.")
+        else:
+            for _, row in no_ds.iterrows():
+                render_ds_no_bet_row(row)
+
+    with best_tab:
+        best = df[df["recommended_outcome_best"] != "No bet"].copy()
+        if best.empty:
+            empty_state("No best-market value bets found.")
+        else:
+            best = best.sort_values(["recommended_edge_best", "recommended_stake_best", "kickoff_time"], ascending=[False, False, True])
+            for _, row in best.iterrows():
+                render_value_bet_card(row, "best", "best")
+                st.caption("Danske Spil: Playable" if row["recommended_outcome_ds"] != "No bet" else "Danske Spil: No bet")
+
+    with slip_tab:
+        st.subheader("Bet slip")
+        if not st.session_state.bet_slip:
+            empty_state("No bets in the slip yet. Add value bets from Match Overview or Betting Center.")
+        else:
+            total_stake = sum(float(item["stake_dkk"]) for item in st.session_state.bet_slip)
+            bankroll = load_bankroll_state()["current_bankroll"]
+            cols = st.columns(4)
+            cols[0].metric("Bets", str(len(st.session_state.bet_slip)))
+            cols[1].metric("Total stake", format_dkk(total_stake))
+            cols[2].metric("Bankroll impact", format_percentage(total_stake / bankroll if bankroll else 0))
+            cols[3].metric("Max exposure", format_dkk(total_stake))
+            if bankroll and total_stake / bankroll > current_profile()["max_stake_pct_of_bankroll"] * max(1, len(st.session_state.bet_slip)):
+                st.warning("Total exposure is high compared with the active stake settings.")
+            st.dataframe(format_bet_slip_table(st.session_state.bet_slip), width="stretch", hide_index=True)
+            c1, c2 = st.columns(2)
+            if c1.button("Add selected bets to Bet Log"):
+                commit_bet_slip_to_log()
+                st.rerun()
+            if c2.button("Clear bet slip"):
+                st.session_state.bet_slip = []
+                st.rerun()
+
+    with bankroll_tab:
+        page_bankroll()
+
+    with history_tab:
+        page_bet_log()
+
+
 def page_match_detail(df: pd.DataFrame) -> None:
+    if df.empty:
+        empty_state("No matches loaded yet.")
+        return
     options = {f"{row.match_id} | {row.home_team} vs {row.away_team}": row.match_id for row in df.itertuples()}
     selected_label = st.selectbox(
         "Vælg kamp",
@@ -844,23 +1099,16 @@ def page_match_detail(df: pd.DataFrame) -> None:
     row = df[df["match_id"] == st.session_state.selected_match_id].iloc[0]
 
     st.title(match_label(row))
-    st.caption(
-        f"Kickoff: {row.get('kickoff_time_dk', row['kickoff_time'])} | Group {row['group']} | Matchday {row['matchday']} | "
-        f"Data mode: {st.session_state.active_data_mode.title()} | "
-        f"Model source: {st.session_state.active_model_source.replace('_', ' ').title()}"
-    )
+    st.caption(f"{row.get('kickoff_time_dk', row['kickoff_time'])} · Group {row['group']} · Matchday {row['matchday']}")
+    prediction = match_prediction_summary(row)
 
     h1, h2, h3 = st.columns(3)
     with h1:
-        metric_card("Active probabilities", f"H {format_probability(row.get('active_home_prob', row['model_home_prob']))}", f"U {format_probability(row.get('active_draw_prob', row['model_draw_prob']))} | A {format_probability(row.get('active_away_prob', row['model_away_prob']))}")
+        metric_card("Favorite", prediction["favorite"], "The team with the highest predicted win probability.")
     with h2:
-        metric_card("Market probabilities", f"H {format_probability(row['market_home_prob'])}", f"U {format_probability(row['market_draw_prob'])} | A {format_probability(row['market_away_prob'])}")
+        metric_card("Prediction", prediction["line"])
     with h3:
-        metric_card("Model probabilities", f"H {format_probability(row['model_home_prob'])}", f"U {format_probability(row['model_draw_prob'])} | A {format_probability(row['model_away_prob'])}")
-    st.caption(
-        f"Recommendations and Kelly use: {probability_source_label(row)}. "
-        "If model and market probabilities are identical, the app is currently using market fallback."
-    )
+        metric_card("Betting decision", row["recommendation_status"], betting_decision_summary(row))
 
     prob_df = pd.DataFrame(
         {
@@ -876,22 +1124,8 @@ def page_match_detail(df: pd.DataFrame) -> None:
     )
     if "ensemble_home_prob" in row.index:
         prob_df["Ensemble"] = [row.get("ensemble_home_prob"), row.get("ensemble_draw_prob"), row.get("ensemble_away_prob")]
-    c1, c2 = st.columns([1, 1.2])
-    c1.subheader("Probability comparison")
-    c1.caption(f"Active Kelly source: {probability_source_label(row)}")
-    c1.dataframe(
-        prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
-        width="stretch",
-        hide_index=True,
-    )
-    c2.plotly_chart(active_vs_market_model_chart(row), width="stretch")
 
-    st.subheader("Odds comparison")
-    st.dataframe(odds_comparison_table(row), width="stretch", hide_index=True)
-
-    st.subheader("Edge and Kelly")
-    st.dataframe(style_edge_table(outcome_kelly_table(row)), width="stretch", hide_index=True)
-
+    st.subheader("Betting decision")
     c1, c2 = st.columns(2)
     with c1:
         recommendation_card_v2(
@@ -909,9 +1143,9 @@ def page_match_detail(df: pd.DataFrame) -> None:
         if row["recommended_outcome_ds"] == "No bet":
             st.caption(f"Why disabled: {no_bet_reason(row, 'ds')}")
         st.button(
-            "Add Danske Spil recommendation to bet log",
+            "Add Danske Spil to bet slip",
             disabled=row["recommended_outcome_ds"] == "No bet",
-            on_click=add_recommended_bet,
+            on_click=add_recommendation_to_bet_slip,
             args=(row, "ds"),
         )
     with c2:
@@ -930,9 +1164,9 @@ def page_match_detail(df: pd.DataFrame) -> None:
         if row["recommended_outcome_best"] == "No bet":
             st.caption(f"Why disabled: {no_bet_reason(row, 'best')}")
         st.button(
-            "Add Best Market recommendation to bet log",
+            "Add Best Market to bet slip",
             disabled=row["recommended_outcome_best"] == "No bet",
-            on_click=add_recommended_bet,
+            on_click=add_recommendation_to_bet_slip,
             args=(row, "best"),
         )
 
@@ -943,6 +1177,20 @@ def page_match_detail(df: pd.DataFrame) -> None:
         row["both_teams_draw_satisfied"],
         row["one_team_must_win"],
     )
+
+    with st.expander("Advanced probability details"):
+        st.caption(f"Active recommendation source: {probability_source_label(row)}")
+        c1, c2 = st.columns([1, 1.2])
+        c1.dataframe(
+            prob_df.style.format({column: "{:.1%}" for column in prob_df.columns if column != "Outcome"}),
+            width="stretch",
+            hide_index=True,
+        )
+        c2.plotly_chart(active_vs_market_model_chart(row), width="stretch")
+
+    with st.expander("Odds and Kelly details"):
+        st.dataframe(odds_comparison_table(row), width="stretch", hide_index=True)
+        st.dataframe(style_edge_table(outcome_kelly_table(row)), width="stretch", hide_index=True)
 
 
 def page_bankroll() -> None:
@@ -1161,6 +1409,179 @@ def page_analytics() -> None:
                 ("Predictions", str(backtest_status["prediction_count"])),
             ]
         )
+
+
+def page_my_bets() -> None:
+    st.title("My Bets")
+    st.caption("Pending bets, settled bets, bankroll and performance. Model metrics live in Model & Data.")
+    summary = calculate_bet_summary()
+    state = load_bankroll_state()
+    bet_df = load_bet_log()
+    pending_exposure = float(bet_df.loc[bet_df["result"] == "pending", "stake_dkk"].sum()) if not bet_df.empty else 0.0
+    cols = st.columns(5)
+    cols[0].metric("Current bankroll", format_dkk(state["current_bankroll"]))
+    cols[1].metric("Pending bets", str(summary["pending_bets"]))
+    cols[2].metric("Pending exposure", format_dkk(pending_exposure))
+    cols[3].metric("P/L", format_dkk(summary["total_profit_loss"]))
+    cols[4].metric("ROI", format_percentage(summary["roi"]))
+
+    bet_tab, bankroll_tab, performance_tab = st.tabs(["Pending & settled", "Bankroll", "Performance"])
+    with bet_tab:
+        page_bet_log()
+    with bankroll_tab:
+        page_bankroll()
+    with performance_tab:
+        df = load_bet_log()
+        settled = df[df["result"].isin(["won", "lost", "void"])] if not df.empty else df
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Profit/loss by bookmaker")
+            render_chart(profit_loss_by_bookmaker_chart(settled))
+        with c2:
+            st.subheader("Profit/loss by outcome")
+            render_chart(profit_loss_by_outcome_chart(settled))
+
+
+def page_model_data(df: pd.DataFrame) -> None:
+    st.title("Model & Data")
+    st.caption("Teknisk transparens om prediction engine, data readiness, backtest, ensemble og fixtures.")
+    engine_tab, readiness_tab, model_tab, backtest_tab, ensemble_tab, draw_tab, fixture_tab = st.tabs(
+        ["Prediction engine", "Data readiness", "Model status", "Backtest", "Ensemble", "Draw-context", "Fixture data"]
+    )
+    with engine_tab:
+        st.subheader("Current prediction setup")
+        metric_row(
+            [
+                ("Data mode", st.session_state.active_data_mode.title()),
+                ("Matches loaded", str(len(df))),
+                ("Probability source", PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)),
+                ("Model source", st.session_state.active_model_source.replace("_", " ").title()),
+            ]
+        )
+        st.dataframe(app_health_rows(df), width="stretch", hide_index=True)
+    with readiness_tab:
+        st.subheader("Data readiness")
+        st.caption(fixture_provenance_text(st.session_state.active_data_mode, df))
+        st.dataframe(app_health_rows(df), width="stretch", hide_index=True)
+    with model_tab:
+        status = get_active_model_status()
+        metric_row(
+            [
+                ("Model available", "Yes" if status["model_exists"] else "No"),
+                ("Training rows", str(status["number_of_training_rows"])),
+                ("Accuracy", "-" if status["accuracy"] is None else format_percentage(status["accuracy"])),
+                ("Log loss", "-" if status["log_loss"] is None else f"{status['log_loss']:.3f}"),
+                ("Brier", "-" if status["brier_score"] is None else f"{status['brier_score']:.3f}"),
+            ]
+        )
+        st.caption(f"Trained at: {status['trained_at'] or '-'}")
+    with backtest_tab:
+        page_backtest_metrics()
+    with ensemble_tab:
+        page_ensemble(df)
+    with draw_tab:
+        page_draw_hypothesis(df)
+    with fixture_tab:
+        fixtures = load_fixture_dataset()
+        valid, messages = validate_fixture_dataset(fixtures)
+        metric_row(
+            [
+                ("Fixture rows", str(len(fixtures))),
+                ("Expected", "104"),
+                ("Valid complete set", "Yes" if valid else "No"),
+                ("Last checked", fixtures["source_last_checked"].max() if "source_last_checked" in fixtures.columns and not fixtures.empty else "-"),
+            ]
+        )
+        for message in messages:
+            st.warning(message)
+        st.dataframe(fixtures, width="stretch", hide_index=True)
+
+
+def page_advanced_admin(df: pd.DataFrame) -> None:
+    st.title("Advanced / Admin")
+    st.warning("These actions are for development/admin use. Normal users do not need to run them.")
+    settings_tab, backtest_tab, draw_tab, ensemble_tab, fixture_tab = st.tabs(
+        ["Settings & actions", "Run backtest", "Draw hypothesis", "Ensemble actions", "Validate fixtures"]
+    )
+    with settings_tab:
+        page_settings()
+    with backtest_tab:
+        page_backtest_metrics()
+    with draw_tab:
+        page_draw_hypothesis(df)
+    with ensemble_tab:
+        page_ensemble(df)
+    with fixture_tab:
+        fixtures = load_fixture_dataset()
+        valid, messages = validate_fixture_dataset(fixtures)
+        st.subheader("Fixture validation")
+        st.metric("Valid complete fixture set", "Yes" if valid else "No")
+        for message in messages:
+            st.warning(message)
+        st.dataframe(fixtures, width="stretch", hide_index=True)
+
+
+def page_user_settings() -> None:
+    st.title("Settings")
+    st.caption("Brugerindstillinger for data mode, Kelly staking og foretrukken bookmaker.")
+    st.subheader("Data mode")
+    mode_labels = {
+        "Official fixtures": "official",
+        "Sample/demo data": "sample",
+        "Live odds data": "live",
+    }
+    current_label = next(
+        label for label, value in mode_labels.items()
+        if value == st.session_state.data_mode
+    )
+    selected_mode_label = st.radio(
+        "Choose data source",
+        list(mode_labels.keys()),
+        index=list(mode_labels.keys()).index(current_label),
+        horizontal=True,
+    )
+    st.session_state.data_mode = mode_labels[selected_mode_label]
+    st.caption(fixture_provenance_text(st.session_state.data_mode))
+    if st.session_state.data_mode == "sample":
+        st.warning("Sample/demo data is for UI testing only and is not official World Cup fixture data.")
+
+    st.subheader("Staking")
+    profile_name = st.selectbox(
+        "Kelly profile",
+        list(STAKING_PROFILES.keys()),
+        index=list(STAKING_PROFILES.keys()).index(st.session_state.kelly_profile_name),
+    )
+    if profile_name != st.session_state.kelly_profile_name:
+        st.session_state.kelly_profile_name = profile_name
+        st.session_state.staking_profile = get_staking_profile(profile_name)
+        st.rerun()
+    profile = current_profile()
+    metric_row(
+        [
+            ("Fractional Kelly", format_percentage(profile["fractional_kelly_multiplier"])),
+            ("Max stake", format_percentage(profile["max_stake_pct_of_bankroll"])),
+            ("Minimum edge", format_percentage(profile["min_edge_threshold"])),
+            ("Minimum stake", format_percentage(profile["min_stake_pct_threshold"])),
+        ]
+    )
+    st.session_state.preferred_bookmaker = st.text_input("Preferred bookmaker", st.session_state.preferred_bookmaker)
+    with st.expander("Advanced probability source"):
+        st.caption("Normal users can leave this on Best validated source.")
+        source_labels = {
+            "Best validated source": "best_validated",
+            "Market only": "market",
+            "Historical model": "historical_model",
+            "Draw-context model": "draw_context_model",
+            "Ensemble": "ensemble",
+        }
+        reverse_source_labels = {value: key for key, value in source_labels.items()}
+        selected_probability_source = st.selectbox(
+            "Kelly probability source",
+            list(source_labels.keys()),
+            index=list(source_labels.keys()).index(reverse_source_labels.get(st.session_state.probability_source, "Best validated source")),
+            key="user_probability_source",
+        )
+        st.session_state.probability_source = source_labels[selected_probability_source]
 
 
 def _load_optional_csv(path) -> pd.DataFrame:
@@ -1864,23 +2285,19 @@ show_sidebar()
 df, validation_warnings, validation_errors = load_enriched_predictions()
 show_validation_messages(validation_warnings, validation_errors)
 
-if st.session_state.page == "Overview":
+if st.session_state.page == "Match Overview":
     page_overview(df)
+elif st.session_state.page == "Betting Center":
+    page_betting_center(df)
+elif st.session_state.page == "My Bets":
+    page_my_bets()
 elif st.session_state.page == "Match Detail":
     page_match_detail(df)
-elif st.session_state.page == "Bankroll":
-    page_bankroll()
-elif st.session_state.page == "Bet Log":
-    page_bet_log()
-elif st.session_state.page == "Analytics":
-    page_analytics()
-elif st.session_state.page == "Backtest & Metrics":
-    page_backtest_metrics()
-elif st.session_state.page == "Draw Hypothesis":
-    page_draw_hypothesis(df)
-elif st.session_state.page == "Ensemble":
-    page_ensemble(df)
-elif st.session_state.page == "Admin / Settings":
-    page_settings()
+elif st.session_state.page == "Model & Data":
+    page_model_data(df)
+elif st.session_state.page == "Settings":
+    page_user_settings()
+elif st.session_state.page == "Advanced / Admin":
+    page_advanced_admin(df)
 else:
-    page_about(df)
+    page_overview(df)

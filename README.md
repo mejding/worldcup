@@ -54,25 +54,24 @@ streamlit run app.py
 
 ## Pages
 
-- Overview: upcoming matches, probabilities, odds, edge, recommendations and quick bet logging
-- Match Detail: probability comparison, odds comparison, Kelly table, draw-context and add-bet actions
-- Bankroll: current bankroll, bankroll history, manual updates and reset
-- Bet Log: bet table, manual bet entry, settlement and settlement reset
-- Analytics: bet-log summaries and simple breakdowns
-- Backtest & Metrics: walk-forward model evaluation, calibration tables, segments and report
-- Settings: Kelly profiles, manual staking overrides, preferred bookmaker and data mode
-- About: methodology, limitations, storage warning and health check
+- Match Overview: the default landing page with upcoming matches, favorites, probabilities, betting decision, stake and reason.
+- Betting Center: value bets, Danske Spil view, best-market view, bet slip, bankroll and bet history in horizontal tabs.
+- My Bets: pending/settled bets, bankroll and betting performance without model metrics.
+- Match Detail: simple match decision first, with probability and Kelly details tucked into expanders.
+- Model & Data: prediction engine, data readiness, model status, backtest, ensemble, draw-context and fixture data.
+- Settings: user-facing data mode, Kelly profile and preferred bookmaker settings.
+- Advanced / Admin: odds refresh, model training/apply actions, backtest, draw hypothesis, ensemble actions and fixture validation.
 
 ## End-to-End Flow
 
-1. Open `Overview` and scan upcoming matches, favorite, probabilities, draw-context and recommendation status.
+1. Open `Match Overview` and scan upcoming matches, favorite, probabilities and recommendation status.
 2. Select a match to open `Match Detail`.
 3. Compare market, model and active probabilities, then inspect Danske Spil and best-market recommendations separately.
-4. Add a recommended bet from Match Detail only if the card is not `No bet`.
-5. Open `Bet Log` to review pending bets. Adding a bet does not change bankroll.
-6. Settle a pending bet as `won`, `lost` or `void`.
+4. Add a recommended bet to the `Bet slip` only if the card is not `No bet`.
+5. Review total stake and exposure in `Betting Center` -> `Bet slip`, then add selected bets to Bet Log.
+6. Settle a pending bet as `won`, `lost` or `void` from `My Bets` or `Betting Center` -> `Bet history`.
 7. Bankroll updates exactly once when the bet is settled. Wins add profit only, losses subtract stake, void bets do not change bankroll.
-8. Review `Bankroll` and `Analytics` for updated tracking.
+8. Review `My Bets` for bankroll and performance tracking.
 
 ## Interpreting Recommendations
 
