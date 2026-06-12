@@ -60,6 +60,29 @@ def apply_custom_theme() -> None:
         .wc-rec-details { color: #334155; font-size: 0.88rem; }
         .wc-hero-title { font-size: 1.55rem; font-weight: 850; margin-bottom: 0.1rem; }
         .wc-hero-subtitle { color: var(--wc-muted); font-size: 0.93rem; margin-bottom: 0.55rem; }
+        .wc-match-compact {
+            background: var(--wc-card);
+            border: 1px solid var(--wc-border);
+            border-radius: 7px;
+            padding: 0.42rem 0.58rem;
+            margin: 0.28rem 0 0.16rem 0;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+        }
+        .wc-match-main {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+        .wc-match-title { font-size: 0.96rem; font-weight: 780; line-height: 1.15; }
+        .wc-match-meta, .wc-match-line, .wc-match-reason {
+            color: #475569;
+            font-size: 0.79rem;
+            line-height: 1.22;
+            margin-top: 0.08rem;
+        }
+        .wc-match-reason { color: var(--wc-muted); }
+        .wc-match-status { white-space: nowrap; font-size: 0.8rem; line-height: 1.2; }
         section.main h1, section.main h2, section.main h3 { letter-spacing: 0; }
         button[kind="primary"], .stButton button { border-radius: 7px; }
         </style>

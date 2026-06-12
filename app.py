@@ -1,3 +1,4 @@
+import html
 from typing import Optional
 
 import pandas as pd
@@ -817,6 +818,60 @@ def fixture_provenance_text(mode: str, df: Optional[pd.DataFrame] = None) -> str
     )
 
 
+def data_freshness_path_for_mode(mode: str):
+    if mode == "live":
+        return LIVE_PREDICTIONS_PATH
+    if mode == "sample":
+        return SAMPLE_PREDICTIONS_PATH
+    return REFERENCE_FIXTURES_PATH
+
+
+def odds_availability_message(df: pd.DataFrame) -> Optional[str]:
+    odds_columns = ["best_home_odds", "best_draw_odds", "best_away_odds"]
+    has_best_odds = (
+        all(column in df.columns for column in odds_columns)
+        and df[odds_columns].apply(pd.to_numeric, errors="coerce").notna().any().any()
+    )
+    if has_best_odds:
+        return None
+    if not get_secret_or_env("ODDS_API_KEY"):
+        return "Odds findes på markedet, men appen kan ikke hente dem endnu: ODDS_API_KEY mangler i miljøet/Streamlit secrets."
+    live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
+    if not live_freshness["file_exists"] or live_freshness["row_count"] == 0:
+        return "Odds API key er sat, men live odds er ikke hentet endnu. Kør Fetch latest odds under Advanced / Admin."
+    return "Live predictions er indlæst, men ingen 1X2-odds matchede fixtures. Tjek odds-providerens sport key/regions og bookmaker coverage."
+
+
+def compact_match_card(row) -> None:
+    prediction = match_prediction_summary(row)
+    status = html.escape(str(row["recommendation_status"]))
+    status_class = {
+        "Playable at Danske Spil": "wc-status-green",
+        "Better elsewhere": "wc-status-amber",
+        "No bet": "wc-status-muted",
+    }.get(row["recommendation_status"], "wc-status-muted")
+    reason = no_bet_reason(row, "best") if row["recommendation_status"] == "No bet" else (
+        no_bet_reason(row, "ds") if row["recommended_outcome_ds"] == "No bet" else "Danske Spil odds are high enough to create value."
+    )
+    st.markdown(
+        f"""
+        <div class="wc-match-compact">
+          <div class="wc-match-main">
+            <div>
+              <div class="wc-match-title">{html.escape(match_label(row))}</div>
+              <div class="wc-match-meta">{html.escape(str(row.get('kickoff_time_dk', row['kickoff_time'])))} · Group {html.escape(str(row['group']))} · MD {html.escape(str(row['matchday']))}</div>
+            </div>
+            <div class="{status_class} wc-match-status">{status}</div>
+          </div>
+          <div class="wc-match-line"><b>Favorite:</b> {html.escape(prediction['favorite'])} · {html.escape(prediction['line'])}</div>
+          <div class="wc-match-line"><b>Decision:</b> {html.escape(betting_decision_summary(row))} · <b>DS:</b> {html.escape(recommendation_summary(row, 'ds'))} · <b>Best:</b> {html.escape(recommendation_summary(row, 'best'))}</div>
+          <div class="wc-match-reason">{html.escape(reason)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def page_overview(df: pd.DataFrame) -> None:
     st.markdown(
         """
@@ -847,10 +902,11 @@ def page_overview(df: pd.DataFrame) -> None:
         st.metric("No bet", str(counts.get("No bet", 0)), help=TOOLTIPS["no_bet"])
     with kpi_cols[5]:
         st.metric("High draw", str((df["draw_context_label"] == "High").sum()), help=TOOLTIPS["draw_context"])
-    freshness = get_data_freshness(
-        LIVE_PREDICTIONS_PATH if st.session_state.active_data_mode == "live" else SAMPLE_PREDICTIONS_PATH
-    )
+    freshness = get_data_freshness(data_freshness_path_for_mode(st.session_state.active_data_mode))
     st.caption(f"Sidst opdateret: {freshness['last_modified'] or 'not available'} | Rækker: {len(df)}")
+    odds_message = odds_availability_message(df)
+    if odds_message:
+        st.info(odds_message)
     if st.session_state.active_data_mode == "live":
         st.info(
             "Live mode uses fetched odds and the best available prediction source. If model predictions cannot be generated, market probabilities are used as fallback."
@@ -861,7 +917,7 @@ def page_overview(df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
-    with st.expander("Filtre", expanded=True):
+    with st.expander("Filtre", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         groups = c1.multiselect("Group", sorted(df["group"].unique()), default=sorted(df["group"].unique()))
         matchdays = c2.multiselect(
@@ -893,45 +949,26 @@ def page_overview(df: pd.DataFrame) -> None:
         filtered = filtered[filtered["recommendation_status"] == "Better elsewhere"]
 
     for _, row in filtered.iterrows():
-        with st.container(border=True):
-            prediction = match_prediction_summary(row)
-            top_cols = st.columns([3.1, 1.2])
-            top_cols[0].markdown(f"**{match_label(row)}**")
-            top_cols[0].caption(
-                f"Kickoff: {row.get('kickoff_time_dk', row['kickoff_time'])} | Group {row['group']} | Matchday {row['matchday']}"
-            )
-            top_cols[0].caption(f"Favorite: {prediction['favorite']} | {prediction['line']}")
-            top_cols[1].markdown(status_badge(row["recommendation_status"]), unsafe_allow_html=True)
-            top_cols[1].markdown(draw_context_badge(row["draw_context_label"]), unsafe_allow_html=True)
-
-            rec_cols = st.columns([2.2, 2.4, 1])
-            rec_cols[0].caption(f"Decision: {betting_decision_summary(row)}")
-            rec_cols[1].caption(f"Bookmaker/value: DS {recommendation_summary(row, 'ds')} | Best {recommendation_summary(row, 'best')}")
-            if row["recommendation_status"] == "No bet":
-                rec_cols[0].caption(f"Reason: {no_bet_reason(row, 'best')}")
-            elif row["recommended_outcome_ds"] == "No bet":
-                rec_cols[0].caption(f"DS reason: {no_bet_reason(row, 'ds')}")
-            if rec_cols[2].button("Vælg kamp", key=f"select_{row['match_id']}"):
-                st.session_state.selected_match_id = row["match_id"]
-                st.session_state.page = "Match Detail"
-                st.rerun()
-            b1, b2 = st.columns(2)
-            b1.button(
-                "Add DS to bet slip",
-                key=f"add_ds_{row['match_id']}",
-                disabled=row["recommended_outcome_ds"] == "No bet",
-                on_click=add_recommendation_to_bet_slip,
-                args=(row, "ds"),
-            )
-            b2.button(
-                "Add best market to bet slip",
-                key=f"add_best_{row['match_id']}",
-                disabled=row["recommended_outcome_best"] == "No bet",
-                on_click=add_recommendation_to_bet_slip,
-                args=(row, "best"),
-            )
-            if row["recommended_outcome_ds"] == "No bet" or row["recommended_outcome_best"] == "No bet":
-                st.caption("Disabled add buttons mean the market does not pass the configured edge and Kelly thresholds.")
+        compact_match_card(row)
+        action_cols = st.columns([0.8, 1, 1, 6])
+        if action_cols[0].button("Detail", key=f"select_{row['match_id']}"):
+            st.session_state.selected_match_id = row["match_id"]
+            st.session_state.page = "Match Detail"
+            st.rerun()
+        action_cols[1].button(
+            "Add DS",
+            key=f"add_ds_{row['match_id']}",
+            disabled=row["recommended_outcome_ds"] == "No bet",
+            on_click=add_recommendation_to_bet_slip,
+            args=(row, "ds"),
+        )
+        action_cols[2].button(
+            "Add best",
+            key=f"add_best_{row['match_id']}",
+            disabled=row["recommended_outcome_best"] == "No bet",
+            on_click=add_recommendation_to_bet_slip,
+            args=(row, "best"),
+        )
 
     table_columns = [
         "kickoff_time_dk",
