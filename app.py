@@ -128,6 +128,7 @@ from recommendations import add_recommendations
 from time_utils import add_danish_kickoff_column, format_danish_kickoff
 from tooltip_definitions import TOOLTIPS
 from train_model import train_historical_model
+from ui_navigation import PAGES, apply_navigation_css, render_sidebar_navigation, render_sidebar_status_card
 from ui_theme import apply_custom_theme
 
 
@@ -135,15 +136,18 @@ st.set_page_config(
     page_title="VM 2026 Prediction & Kelly",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 apply_custom_theme()
+apply_navigation_css()
 ensure_runtime_data_files()
 
 
 def init_session_state() -> None:
     if "page" not in st.session_state:
         st.session_state.page = "Match Overview"
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = st.session_state.page
     if "kelly_profile_name" not in st.session_state:
         st.session_state.kelly_profile_name = DEFAULT_PROFILE_NAME
     if "staking_profile" not in st.session_state:
@@ -788,16 +792,6 @@ def show_sidebar() -> None:
     state = load_bankroll_state()
     net = state["current_bankroll"] - state["starting_bankroll"]
     ret = net / state["starting_bankroll"] if state["starting_bankroll"] else 0
-    pages = [
-        "Match Overview",
-        "Match Archive",
-        "Betting Center",
-        "My Bets",
-        "Match Detail",
-        "Model & Data",
-        "Settings",
-        "Advanced / Admin",
-    ]
     page_aliases = {
         "Overview": "Match Overview",
         "Bet Log": "My Bets",
@@ -809,27 +803,32 @@ def show_sidebar() -> None:
         "Draw Hypothesis": "Model & Data",
         "Ensemble": "Model & Data",
     }
-    st.session_state.page = page_aliases.get(st.session_state.page, st.session_state.page)
-    st.sidebar.title("Navigation")
-    st.session_state.page = st.sidebar.radio(
-        "Side",
-        pages,
-        index=pages.index(st.session_state.page) if st.session_state.page in pages else 0,
+    page_keys = [page["key"] for page in PAGES]
+    requested_page = page_aliases.get(st.session_state.get("page", "Match Overview"), st.session_state.get("page", "Match Overview"))
+    active_page = page_aliases.get(st.session_state.get("current_page", requested_page), st.session_state.get("current_page", requested_page))
+    if requested_page != active_page and requested_page in page_keys:
+        active_page = requested_page
+    if active_page not in page_keys:
+        active_page = "Match Overview"
+    st.session_state.current_page = active_page
+    st.session_state.page = active_page
+
+    st.sidebar.markdown(
+        """
+        <div class="wc-sidebar-brand">
+          <div class="wc-sidebar-brand-main">VM 2026</div>
+          <div class="wc-sidebar-brand-sub">Prediction & Kelly</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.sidebar.divider()
-    st.sidebar.markdown("**Bankroll**")
-    st.sidebar.metric("Current bankroll", format_dkk(state["current_bankroll"]))
-    st.sidebar.caption(f"Return: {format_dkk(net)} / {format_percentage(ret)}")
-    st.sidebar.divider()
-    st.sidebar.markdown("**Staking profile**")
-    st.sidebar.caption(f"Kelly profile: {st.session_state.kelly_profile_name}")
-    profile = current_profile()
-    st.sidebar.caption(f"Fractional Kelly: {format_percentage(profile['fractional_kelly_multiplier'])}")
-    st.sidebar.caption(f"Max stake: {format_percentage(profile['max_stake_pct_of_bankroll'])}")
-    st.sidebar.caption(f"Minimum edge: {format_percentage(profile['min_edge_threshold'])}")
-    st.sidebar.caption(f"Minimum stake: {format_percentage(profile['min_stake_pct_threshold'])}")
-    st.sidebar.divider()
-    st.sidebar.markdown("**Data mode**")
+
+    selected_page = render_sidebar_navigation(PAGES, active_page)
+    if selected_page != active_page:
+        st.session_state.current_page = selected_page
+        st.session_state.page = selected_page
+        st.rerun()
+
     if st.session_state.active_data_mode == "live":
         mode_path = LIVE_PREDICTIONS_PATH
     elif st.session_state.active_data_mode == "sample":
@@ -837,13 +836,29 @@ def show_sidebar() -> None:
     else:
         mode_path = REFERENCE_FIXTURES_PATH
     freshness = get_data_freshness(mode_path)
-    st.sidebar.caption(f"Mode: {st.session_state.active_data_mode.title()}")
-    st.sidebar.caption(fixture_provenance_text(st.session_state.active_data_mode))
-    st.sidebar.caption(f"Prediction source: {PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source)}")
-    st.sidebar.caption(f"Rows: {freshness['row_count']}")
-    st.sidebar.caption(f"Updated: {freshness['last_modified'] or '-'}")
+    odds_status = get_odds_source_status()
+    odds_label = {
+        "api": "The Odds API",
+        "manual": "Manual CSV",
+        "cached": "Cached snapshot",
+        "missing": "Missing",
+    }.get(odds_status["active_odds_source"], odds_status["active_odds_source"].title())
+    if odds_status["active_odds_source"] in {"api", "manual", "cached"}:
+        odds_label = f"{odds_label} · refresh required"
+
+    st.sidebar.markdown('<div class="wc-sidebar-status-title">Status</div>', unsafe_allow_html=True)
+    render_sidebar_status_card("Bankroll", f"{format_dkk(state['current_bankroll'])} · {format_dkk(net)} / {format_percentage(ret)}")
+    render_sidebar_status_card(
+        "Source",
+        PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source),
+    )
+    render_sidebar_status_card("Odds", odds_label)
+    render_sidebar_status_card(
+        "Data",
+        f"{st.session_state.active_data_mode.title()} · {freshness['row_count']} rows · {freshness['last_modified'] or '-'}",
+    )
     if st.session_state.active_data_mode == "live":
-        st.sidebar.caption(f"API key: {'configured' if get_secret_or_env('ODDS_API_KEY') else 'missing'}")
+        render_sidebar_status_card("API key", "Configured" if get_secret_or_env("ODDS_API_KEY") else "Missing")
 
 
 def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
@@ -2503,21 +2518,23 @@ show_sidebar()
 df, validation_warnings, validation_errors = load_enriched_predictions()
 show_validation_messages(validation_warnings, validation_errors)
 
-if st.session_state.page == "Match Overview":
+current_page = st.session_state.current_page
+
+if current_page == "Match Overview":
     page_overview(df)
-elif st.session_state.page == "Match Archive":
+elif current_page == "Match Archive":
     page_match_archive(df)
-elif st.session_state.page == "Betting Center":
+elif current_page == "Betting Center":
     page_betting_center(df)
-elif st.session_state.page == "My Bets":
+elif current_page == "My Bets":
     page_my_bets()
-elif st.session_state.page == "Match Detail":
+elif current_page == "Match Detail":
     page_match_detail(df)
-elif st.session_state.page == "Model & Data":
+elif current_page == "Model & Data":
     page_model_data(df)
-elif st.session_state.page == "Settings":
+elif current_page == "Settings":
     page_user_settings()
-elif st.session_state.page == "Advanced / Admin":
+elif current_page == "Advanced / Admin":
     page_advanced_admin(df)
 else:
     page_overview(df)
