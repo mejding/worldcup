@@ -68,6 +68,8 @@ from backtest_paths import (
     ENSEMBLE_PREDICTIONS_PATH,
     ENSEMBLE_REPORT_PATH,
     PROCESSED_DATA_DIR,
+    WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
+    WORLD_CUP_BACKTEST_SUMMARY_PATH,
 )
 from config import (
     DATA_MODE,
@@ -1832,6 +1834,29 @@ def _load_optional_csv(path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def render_world_cup_sanity_check_results() -> None:
+    predictions_df = _load_optional_csv(WORLD_CUP_BACKTEST_PREDICTIONS_PATH)
+    summary_df = _load_optional_csv(WORLD_CUP_BACKTEST_SUMMARY_PATH)
+    if predictions_df.empty and summary_df.empty:
+        return
+
+    st.subheader("World Cup sanity check")
+    if predictions_df.empty:
+        st.warning("World Cup sanity check ran, but no prediction rows were created. See the summary table for the reason.")
+    else:
+        accuracy = pd.to_numeric(predictions_df.get("is_correct", pd.Series(dtype=float)), errors="coerce").mean()
+        metric_row(
+            [
+                ("Predictions", str(len(predictions_df))),
+                ("Correct", str(int(pd.to_numeric(predictions_df.get("is_correct", pd.Series(dtype=int)), errors="coerce").fillna(0).sum()))),
+                ("Accuracy", "-" if pd.isna(accuracy) else format_percentage(float(accuracy))),
+            ]
+        )
+        st.dataframe(predictions_df, width="stretch", hide_index=True)
+    if not summary_df.empty:
+        st.dataframe(summary_df, width="stretch", hide_index=True)
+
+
 def page_backtest_metrics() -> None:
     st.title("Backtest & Metrics")
     st.caption("Time-based walk-forward evaluation for the historical model only.")
@@ -1850,13 +1875,18 @@ def page_backtest_metrics() -> None:
     with cols[4]:
         metric_card("Summary", "Yes" if status["summary_exists"] else "No")
     st.caption(f"Last backtest file update: {status['last_modified'] or '-'}")
+    if not historical_exists:
+        st.warning(
+            "Historical match data is missing, so new model tests cannot be run yet. "
+            "Add data/historical/international_results.csv with results before running Backtest or World Cup sanity check."
+        )
 
     st.subheader("Run backtest")
     c1, c2, c3, c4 = st.columns(4)
     initial_train_end_date = c1.date_input("Initial train end date", value=pd.Timestamp("2014-01-01").date())
     test_window = c2.text_input("Test window", value="365D")
     step_size = c3.text_input("Step size", value="365D")
-    min_train_matches = c4.number_input("Min train matches", min_value=30, value=1000, step=100)
+    min_train_matches = c4.number_input("Min train matches", min_value=30, value=30, step=25)
     run_col, wc_col = st.columns(2)
     with run_col:
         if st.button("Run walk-forward backtest"):
@@ -1898,6 +1928,7 @@ def page_backtest_metrics() -> None:
                     st.success(f"World Cup check complete. Predictions: {len(result['predictions'])}")
                     if result["predictions"].empty:
                         st.warning("No World Cup predictions were created. This is expected if the historical file has too few World Cup rows.")
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"Could not run World Cup sanity check: {exc}")
 
@@ -1910,7 +1941,16 @@ def page_backtest_metrics() -> None:
     draw_df = _load_optional_csv(BACKTEST_DRAW_CALIBRATION_PATH)
     calibration_df = _load_optional_csv(BACKTEST_CALIBRATION_BINS_PATH)
     if predictions_df.empty:
-        empty_state(f"No {variant_label.lower()} backtest results yet.")
+        if summary_df.empty:
+            empty_state(f"No {variant_label.lower()} backtest results yet.")
+        else:
+            st.warning(
+                "Backtest ran, but no prediction rows were created. Check the fold summary below; "
+                "this usually means too little training data, no rows in the selected test windows, "
+                "or invalid historical rows."
+            )
+            st.dataframe(summary_df, width="stretch", hide_index=True)
+        render_world_cup_sanity_check_results()
         return
 
     overall = segment_df[(segment_df["segment_name"] == "Overall") & (segment_df["segment_value"] == "All")].head(1)
@@ -1966,6 +2006,8 @@ def page_backtest_metrics() -> None:
         st.caption("Improvement means lower log loss/Brier/ECE. Draw calibration gap closer to zero is better.")
         render_chart(draw_feature_comparison_chart(comparison_df, "log_loss"))
         st.dataframe(comparison_df, width="stretch", hide_index=True)
+
+    render_world_cup_sanity_check_results()
 
 
 def page_draw_hypothesis(df: pd.DataFrame) -> None:
