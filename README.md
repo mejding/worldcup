@@ -90,6 +90,8 @@ The app is designed so normal users do not need to train or apply models manuall
 - Bundled model artifacts live in `data/models/model.pkl`, `data/models/model_metadata.json` and `data/models/feature_columns.json`.
 - On startup, the app checks for model artifacts and automatically prepares upcoming-match predictions when possible.
 - The primary UI shows the decision, not the modelling machinery: favorite, probabilities, No bet/Playable/Better elsewhere, bookmaker and stake.
+- A bundled model is production-ready only when metadata proves it was trained on a substantial historical international dataset: at least 1000 training rows, 200 test rows and 10 features.
+- Small generated/sample artifacts are marked as demo models. Demo models can be inspected in Advanced / Admin but are not used as `Best available prediction` in official/live mode.
 - If model files are missing or cannot be applied, the app falls back to market probabilities and keeps the normal user flow working.
 - `data/historical/international_results.csv` is developer training input only. It is not required at runtime when pre-trained artifacts are bundled.
 
@@ -324,7 +326,7 @@ Odds APIs may not include Danske Spil or all World Cup fixtures at all times. Th
 
 Sprint 6 added the first historical international football model. It is intentionally simple: a multinomial logistic regression predicting home win, draw and away win.
 
-Normal users do not need historical data. The deployed app should ship with pre-trained artifacts in `data/models/`.
+Normal users do not need historical data. The deployed app should ship with production-ready pre-trained artifacts in `data/models/`. The current bundled baseline artifact is marked as a demo model because it was trained on too little generated/sample data.
 
 Place historical data here:
 
@@ -356,11 +358,21 @@ Developer training workflow:
 3. Commit or deploy the generated artifacts in `data/models/`.
 4. Open the app. It loads pre-trained artifacts automatically.
 
+Production training expectations:
+
+- thousands of historical international matches
+- at least 1000 training rows and 200 test rows after chronological split
+- multiple years of World Cup, continental tournament, qualifier and friendly data
+- Elo-style strength features, recent-form features, tournament context and neutral venue
+- metadata fields such as `training_rows`, `test_rows`, `feature_count`, `training_data_source`, performance metrics and `is_demo_model`
+
 Command-line training is also available:
 
 ```bash
 python scripts/train_and_export_model.py --input data/historical/international_results.csv
 ```
+
+For deliberately small development runs, pass `--allow-demo`. Demo exports are marked with `is_demo_model = true` and are not treated as production-ready.
 
 Metrics shown:
 

@@ -52,6 +52,11 @@ def test_best_validated_uses_model_when_market_is_unpriced_placeholder(monkeypat
         "load_active_probability_source",
         lambda: {"source": "best_validated", "resolved_source": "market"},
     )
+    monkeypatch.setattr(
+        probability_sources,
+        "get_model_readiness",
+        lambda: {"status": "production_ready", "is_usable_as_best_available": True, "normal_user_message": "Pre-trained model loaded."},
+    )
     df = pd.DataFrame(
         {
             "market_home_prob": [1 / 3],
@@ -74,7 +79,44 @@ def test_best_validated_uses_model_when_market_is_unpriced_placeholder(monkeypat
     assert result.iloc[0]["active_probability_source"] == "historical_model"
     assert result.iloc[0]["active_home_prob"] == pytest.approx(0.45)
     assert result.iloc[0]["active_draw_prob"] == pytest.approx(0.30)
-    assert result.attrs["warnings"]
+
+
+def test_best_validated_does_not_use_demo_model_placeholder(monkeypatch):
+    monkeypatch.setattr(
+        probability_sources,
+        "load_active_probability_source",
+        lambda: {"source": "best_validated", "resolved_source": "market"},
+    )
+    monkeypatch.setattr(
+        probability_sources,
+        "get_model_readiness",
+        lambda: {
+            "status": "demo_model",
+            "is_usable_as_best_available": False,
+            "normal_user_message": "Predictions are based on market odds because the available model is only a demo model.",
+        },
+    )
+    df = pd.DataFrame(
+        {
+            "market_home_prob": [1 / 3],
+            "market_draw_prob": [1 / 3],
+            "market_away_prob": [1 / 3],
+            "model_home_prob": [0.45],
+            "model_draw_prob": [0.30],
+            "model_away_prob": [0.25],
+            "best_home_odds": [pd.NA],
+            "best_draw_odds": [pd.NA],
+            "best_away_odds": [pd.NA],
+            "ds_home_odds": [pd.NA],
+            "ds_draw_odds": [pd.NA],
+            "ds_away_odds": [pd.NA],
+        }
+    )
+
+    result = apply_probability_source(df, "best_validated")
+
+    assert result.iloc[0]["active_probability_source"] == "market"
+    assert result.iloc[0]["active_home_prob"] == pytest.approx(1 / 3)
 
 
 def test_active_probability_source_state_can_be_saved_and_loaded(tmp_path):

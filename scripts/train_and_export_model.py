@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--test-start-date", default=None, help="Optional train/test cutoff date, e.g. 2022-01-01.")
     parser.add_argument("--include-draw-context-features", action="store_true")
     parser.add_argument("--run-backtest", action="store_true", help="Also run the walk-forward backtest outputs.")
+    parser.add_argument("--allow-demo", action="store_true", help="Allow exporting a demo model from a small dataset.")
     parser.add_argument("--initial-train-end-date", default="2014-01-01")
     parser.add_argument("--test-window", default="365D")
     parser.add_argument("--step-size", default="365D")
@@ -44,6 +45,7 @@ def main() -> None:
         input_path,
         test_start_date=args.test_start_date,
         include_draw_context_features=args.include_draw_context_features,
+        allow_demo_model=args.allow_demo,
     )
 
     result = {"model_metadata": metadata}

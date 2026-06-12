@@ -203,6 +203,11 @@ def _empty_historical_results() -> pd.DataFrame:
 def prepare_best_available_predictions() -> list[str]:
     messages = []
     model_status = get_active_model_status()
+    readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
+    if not readiness["is_usable_as_best_available"] and st.session_state.data_mode != "sample":
+        st.session_state.model_source = "market_only"
+        messages.append(readiness["normal_user_message"])
+        return messages
     if not model_status["artifacts_ready"]:
         st.session_state.model_source = "market_only"
         messages.append("Predictions are currently based on market odds because the pre-trained model is unavailable.")
@@ -531,7 +536,7 @@ def app_health_rows(df: pd.DataFrame) -> pd.DataFrame:
         ("Data mode", st.session_state.active_data_mode.title(), fixture_provenance_text(st.session_state.active_data_mode, df)),
         ("Matches loaded", str(len(df)), "Upcoming matches available in the current app mode."),
         ("Active probability source", PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source), "Used for edge and Kelly."),
-        ("Model available", "Yes" if model_status["model_exists"] else "No", "Train/apply model in Settings if needed."),
+        ("Model readiness", model_status["readiness_status"], "Only production-ready models can become Best available."),
         ("Ensemble available", "Yes" if ENSEMBLE_PREDICTIONS_PATH.exists() else "No", "Run or apply ensemble from Ensemble page."),
         ("Bankroll loaded", "Yes" if bankroll_loaded else "No", "Runtime bankroll JSON is readable."),
         ("Bet log loaded", "Yes", f"{len(bet_log)} bets logged."),
@@ -908,7 +913,10 @@ def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
             or "market probabilities" in warning.lower()
         ]
         for warning in user_facing[:1]:
-            st.info("Predictions are currently based on market odds because the pre-trained model is unavailable.")
+            if "demo model" in warning.lower():
+                st.info("Predictions are based on market odds because the available model is only a demo model.")
+            else:
+                st.info("Predictions are currently based on market odds because the pre-trained model is unavailable.")
     else:
         for warning in unique_warnings:
             text = str(warning)
@@ -1776,12 +1784,14 @@ def page_model_performance() -> None:
     metric_row(
         [
             ("Prediction source", "Best available"),
-            ("Pre-trained model", "Loaded" if readiness["artifacts_ready"] else "Fallback"),
-            ("Training rows", str(model_status["number_of_training_rows"])),
-            ("Test rows", str(model_status["number_of_test_rows"])),
+            ("Model status", "Production ready" if readiness["status"] == "production_ready" else "Demo/sample model" if readiness["status"] == "demo_model" else readiness["status"].title()),
+            ("Best available", "Model" if readiness["is_usable_as_best_available"] else "Market fallback"),
+            ("Feature count", str(readiness["feature_count"])),
         ]
     )
     st.info(readiness["normal_user_message"])
+    if readiness["status"] == "demo_model":
+        st.warning("This model is not trained on enough historical data for reliable predictions.")
     st.caption(
         "The app automatically uses the best available prediction source. "
         "If the pre-trained model is unavailable, it falls back to market probabilities."
@@ -1799,7 +1809,7 @@ def page_model_performance() -> None:
             ]
         )
         st.caption("Performance is calculated on historical matches where the result is known.")
-    elif readiness["artifacts_ready"] and model_status["accuracy"] is not None:
+    elif readiness["status"] == "production_ready" and model_status["accuracy"] is not None:
         metric_row(
             [
                 ("Accuracy", format_percentage(model_status["accuracy"])),
@@ -1810,6 +1820,17 @@ def page_model_performance() -> None:
             ]
         )
         st.caption("Showing bundled model holdout metrics. Full backtest results have not been calculated yet.")
+    elif readiness["status"] == "demo_model":
+        metric_row(
+            [
+                ("Training rows", str(readiness["training_rows"])),
+                ("Test rows", str(readiness["test_rows"])),
+                ("Feature count", str(readiness["feature_count"])),
+                ("Model status", "Demo/sample model"),
+            ]
+        )
+        st.warning("Performance metrics are not reliable because the model was trained on too little data.")
+        st.caption("Developer/admin action: train and export a production model using a full historical international match dataset.")
     else:
         empty_state("Model performance has not been calculated yet.")
         st.caption("Performance is calculated on historical matches where the result is known.")
@@ -2514,11 +2535,11 @@ def page_settings() -> None:
     readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     cols = st.columns(4)
     with cols[0]:
-        metric_card("Pre-trained artifacts", "Found" if readiness["artifacts_ready"] else "Missing")
+        metric_card("Model status", readiness["status"].replace("_", " ").title())
     with cols[1]:
-        metric_card("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing")
+        metric_card("Production ready", "Yes" if readiness["is_usable_as_best_available"] else "No")
     with cols[2]:
-        metric_card("Retraining", "Available" if readiness["retraining_available"] else "Disabled")
+        metric_card("Demo model", "Yes" if readiness["status"] == "demo_model" else "No")
     with cols[3]:
         metric_card("Accuracy", "-" if status["accuracy"] is None else format_percentage(status["accuracy"]))
     log_loss_text = "-" if status["log_loss"] is None else f"{status['log_loss']:.3f}"
@@ -2528,6 +2549,22 @@ def page_settings() -> None:
     st.info(readiness["normal_user_message"])
     if not readiness["historical_csv_exists"]:
         st.warning(readiness["admin_training_message"])
+    diagnostic_rows = [
+        ("Model artifact", "Found" if readiness["model_file_exists"] else "Missing"),
+        ("Metadata", "Found" if readiness["metadata_exists"] else "Missing"),
+        ("Feature columns", "Found" if readiness["feature_columns_exists"] else "Missing"),
+        ("Training rows", str(readiness["training_rows"])),
+        ("Test rows", str(readiness["test_rows"])),
+        ("Feature count", str(readiness["feature_count"])),
+        ("Training data source", str(readiness["training_data_source"] or "-")),
+        ("Production-ready", "Yes" if readiness["is_usable_as_best_available"] else "No"),
+        ("Demo model", "Yes" if readiness["status"] == "demo_model" else "No"),
+        ("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing"),
+        ("Retraining", "Available" if readiness["retraining_available"] else "Disabled"),
+    ]
+    st.dataframe(pd.DataFrame(diagnostic_rows, columns=["Check", "Status"]), width="stretch", hide_index=True)
+    for warning in readiness["warnings"]:
+        st.warning(warning)
     st.caption(
         f"Model version: {status['model_version'] or '-'} | Trained at: {status['trained_at'] or '-'} | "
         f"Training rows: {status['number_of_training_rows']} | Test rows: {status['number_of_test_rows']} | "
@@ -2567,7 +2604,8 @@ def page_settings() -> None:
             except Exception as exc:
                 st.error(f"Could not train model: {exc}")
     with apply_col:
-        if st.button("Apply pre-trained model to current matches", disabled=not readiness["artifacts_ready"]):
+        can_apply_model = readiness["is_usable_as_best_available"] or st.session_state.data_mode == "sample"
+        if st.button("Apply pre-trained model to current matches", disabled=not can_apply_model):
             try:
                 base_df, _, actual_mode = load_predictions_by_mode(st.session_state.data_mode, model_source="market_only")
                 if HISTORICAL_RESULTS_PATH.exists():

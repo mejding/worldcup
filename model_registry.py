@@ -9,6 +9,7 @@ from backtest_paths import ENSEMBLE_COMPARISON_PATH
 from config import FEATURE_COLUMNS_PATH, HISTORICAL_RESULTS_PATH, MODEL_METADATA_PATH, MODEL_PATH
 from draw_hypothesis import recommend_draw_context_usage
 from ensemble_backtest import select_best_probability_source
+from model_readiness import validate_model_artifact
 
 
 def model_exists(model_path: Path = None) -> bool:
@@ -37,22 +38,58 @@ def load_model_metadata(path: Path = None) -> dict:
     return json.loads(path.read_text())
 
 
+def _load_feature_columns(path: Path = None) -> list:
+    path = Path(path or FEATURE_COLUMNS_PATH)
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        columns = json.loads(path.read_text())
+        return columns if isinstance(columns, list) else []
+    except Exception:
+        return []
+
+
+def _metadata_with_artifact_flags(
+    model_path: Path = None,
+    metadata_path: Path = None,
+    feature_columns_path: Path = None,
+) -> dict:
+    model_path = Path(model_path or MODEL_PATH)
+    metadata_path = Path(metadata_path or MODEL_METADATA_PATH)
+    feature_columns_path = Path(feature_columns_path or FEATURE_COLUMNS_PATH)
+    metadata = load_model_metadata(metadata_path)
+    feature_columns = _load_feature_columns(feature_columns_path)
+    if feature_columns and "feature_columns" not in metadata:
+        metadata["feature_columns"] = feature_columns
+    metadata["_model_file_exists"] = model_path.exists() and model_path.stat().st_size > 0
+    metadata["_metadata_exists"] = metadata_path.exists() and metadata_path.stat().st_size > 0
+    metadata["_feature_columns_exists"] = feature_columns_path.exists() and feature_columns_path.stat().st_size > 0
+    return metadata
+
+
 def get_active_model_status() -> dict:
-    metadata = load_model_metadata()
-    metrics = metadata.get("metrics", {})
+    metadata = _metadata_with_artifact_flags()
+    validation = validate_model_artifact(metadata)
     artifacts_ready = model_artifacts_exist()
     return {
         "model_exists": model_exists(),
         "artifacts_ready": artifacts_ready,
-        "trained_at": metadata.get("trained_at"),
-        "model_version": metadata.get("model_version", metadata.get("trained_at")),
-        "number_of_training_rows": metadata.get("number_of_training_rows", 0),
-        "number_of_test_rows": metadata.get("number_of_test_rows", 0),
-        "accuracy": metrics.get("accuracy"),
-        "log_loss": metrics.get("log_loss"),
-        "brier_score": metrics.get("brier_score"),
-        "draw_rate_actual": metrics.get("draw_rate_actual"),
-        "draw_rate_predicted": metrics.get("draw_rate_predicted"),
+        "readiness_status": validation["status"],
+        "is_usable_for_predictions": validation["is_usable_for_predictions"],
+        "is_usable_as_best_available": validation["is_usable_as_best_available"],
+        "readiness_warnings": validation["warnings"],
+        "trained_at": validation["trained_at"],
+        "model_version": validation["model_version"],
+        "number_of_training_rows": validation["training_rows"],
+        "number_of_test_rows": validation["test_rows"],
+        "feature_count": validation["feature_count"],
+        "training_data_source": validation["training_data_source"],
+        "accuracy": validation["performance_accuracy"],
+        "log_loss": validation["performance_log_loss"],
+        "brier_score": validation["performance_brier_score"],
+        "ece": validation["performance_ece"],
+        "draw_rate_actual": metadata.get("metrics", {}).get("draw_rate_actual"),
+        "draw_rate_predicted": metadata.get("metrics", {}).get("draw_rate_predicted"),
         "include_draw_context_features": metadata.get("include_draw_context_features", False),
     }
 
@@ -64,30 +101,44 @@ def get_model_readiness(
     historical_path: Path = None,
     predictions_exist: bool = True,
 ) -> dict:
-    metadata = load_model_metadata(metadata_path)
+    metadata = _metadata_with_artifact_flags(model_path, metadata_path, feature_columns_path)
+    validation = validate_model_artifact(metadata)
     artifacts_ready = model_artifacts_exist(model_path, metadata_path, feature_columns_path)
     historical_exists = Path(historical_path or HISTORICAL_RESULTS_PATH).exists()
 
-    if artifacts_ready and predictions_exist:
+    if validation["status"] == "production_ready" and predictions_exist:
         user_status = "Pre-trained model loaded."
-    elif artifacts_ready:
+    elif validation["status"] == "production_ready":
         user_status = "Model loaded. Predictions are being generated for upcoming matches."
+    elif validation["status"] == "demo_model":
+        user_status = "Predictions are based on market odds because the available model is only a demo model."
     else:
         user_status = "Pre-trained model unavailable. The app is using market probabilities as fallback."
 
     return {
         "artifacts_ready": artifacts_ready,
+        "model_file_exists": bool(metadata.get("_model_file_exists")),
+        "metadata_exists": bool(metadata.get("_metadata_exists")),
+        "feature_columns_exists": bool(metadata.get("_feature_columns_exists")),
+        "status": validation["status"],
+        "is_usable_for_predictions": validation["is_usable_for_predictions"],
+        "is_usable_as_best_available": validation["is_usable_as_best_available"],
+        "warnings": validation["warnings"],
         "historical_csv_exists": historical_exists,
         "retraining_available": historical_exists,
         "normal_user_message": user_status,
-        "fallback_to_market": not artifacts_ready,
+        "fallback_to_market": not validation["is_usable_as_best_available"],
         "admin_training_message": (
             "Historical training data is available. Retraining can be run from developer tools."
             if historical_exists
             else "Historical training data is not available in this deployment. Retraining is disabled."
         ),
-        "trained_at": metadata.get("trained_at"),
-        "model_version": metadata.get("model_version", metadata.get("trained_at")),
+        "trained_at": validation["trained_at"],
+        "model_version": validation["model_version"],
+        "training_rows": validation["training_rows"],
+        "test_rows": validation["test_rows"],
+        "feature_count": validation["feature_count"],
+        "training_data_source": validation["training_data_source"],
         "metadata": metadata,
     }
 

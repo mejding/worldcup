@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 from backtest_paths import ACTIVE_PROBABILITY_SOURCE_PATH
+from best_prediction_source import select_best_prediction_source
+from model_registry import get_model_readiness
 
 
 PROBABILITY_SOURCE_LABELS = {
@@ -90,6 +92,10 @@ def _triplet_is_uniform(df: pd.DataFrame, prefix: str) -> pd.Series:
 def _replace_unpriced_market_placeholders(result: pd.DataFrame, source: str, requested: str) -> pd.DataFrame:
     if source != "best_validated" or requested != "market":
         return result
+    readiness = get_model_readiness()
+    if not readiness["is_usable_as_best_available"]:
+        result.attrs.setdefault("warnings", []).append(readiness["normal_user_message"])
+        return result
     model_columns = get_probability_columns("historical_model")
     if not _columns_available(result, model_columns):
         return result
@@ -125,6 +131,16 @@ def apply_probability_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
     warnings = []
     resolved = resolve_probability_source(source)
     requested = resolved.get("resolved_source", "market")
+    if source == "best_validated":
+        readiness = get_model_readiness()
+        market_columns = get_probability_columns("market")
+        market_available = _columns_available(result, market_columns)
+        best_source = select_best_prediction_source(readiness, market_available)
+        requested = best_source["resolved_source"]
+        if requested == "unavailable":
+            raise ValueError("No usable probability source columns available.")
+        if best_source["status"] == "fallback_market":
+            warnings.append(best_source["reason"])
     try:
         columns = get_probability_columns(requested)
     except ValueError:
