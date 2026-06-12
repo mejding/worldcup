@@ -12,6 +12,7 @@ MATCH_RESULTS_COLUMNS = [
     "home_score",
     "away_score",
     "result_status",
+    "result_favorite_outcome",
     "result_last_checked_utc",
     "result_source",
     "result_notes",
@@ -29,7 +30,7 @@ def load_match_results(path: Union[str, Path] = MATCH_RESULTS_PATH) -> pd.DataFr
     for column in MATCH_RESULTS_COLUMNS:
         if column not in df.columns:
             df[column] = pd.NA
-    for column in ["match_id", "result_status", "result_source", "result_notes"]:
+    for column in ["match_id", "result_status", "result_favorite_outcome", "result_source", "result_notes"]:
         df[column] = df[column].astype("string").str.strip()
     return df[MATCH_RESULTS_COLUMNS]
 
@@ -47,6 +48,10 @@ def _actual_outcome(row) -> str:
 
 
 def _favorite_outcome(row) -> str:
+    result_favorite = row.get("result_favorite_outcome")
+    if not pd.isna(result_favorite) and str(result_favorite) in {"home", "away"}:
+        return str(result_favorite)
+
     odds_pairs = [
         ("home", row.get("best_home_odds")),
         ("away", row.get("best_away_odds")),
@@ -85,6 +90,20 @@ def outcome_label(outcome: str, home_team: str, away_team: str) -> str:
     return "-"
 
 
+def _favorite_result_status(row) -> str:
+    if not bool(row.get("is_completed")):
+        return "Upcoming"
+    actual_outcome = row.get("actual_outcome")
+    favorite_outcome = row.get("favorite_outcome")
+    if pd.isna(actual_outcome):
+        return "Resultat mangler"
+    if pd.isna(favorite_outcome):
+        return "Favorit ukendt"
+    if actual_outcome == favorite_outcome:
+        return "Favoritten gik hjem"
+    return "Overraskelse"
+
+
 def add_match_results(predictions: pd.DataFrame, results: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     result = predictions.copy()
     match_results = load_match_results() if results is None else results.copy()
@@ -105,12 +124,7 @@ def add_match_results(predictions: pd.DataFrame, results: Optional[pd.DataFrame]
         lambda row: outcome_label(row.get("favorite_outcome"), row.get("home_team"), row.get("away_team")),
         axis=1,
     )
-    result["favorite_result_status"] = result.apply(
-        lambda row: "Favoritten gik hjem"
-        if bool(row.get("is_completed")) and row.get("actual_outcome") == row.get("favorite_outcome")
-        else ("Overraskelse" if bool(row.get("is_completed")) else "Upcoming"),
-        axis=1,
-    )
+    result["favorite_result_status"] = result.apply(_favorite_result_status, axis=1)
     result["full_time_score"] = result.apply(
         lambda row: f"{int(row['home_score'])}-{int(row['away_score'])}"
         if bool(row.get("is_completed")) and not pd.isna(row.get("home_score")) and not pd.isna(row.get("away_score"))

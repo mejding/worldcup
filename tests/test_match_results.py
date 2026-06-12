@@ -117,6 +117,82 @@ def test_favorite_outcome_ignores_draw_probability():
     assert row["favorite_result_status"] == "Favoritten gik hjem"
 
 
+def test_completed_match_without_clear_favorite_does_not_crash():
+    predictions = pd.DataFrame(
+        [
+            {
+                "match_id": "m1",
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+                "active_home_prob": 1 / 3,
+                "active_draw_prob": 1 / 3,
+                "active_away_prob": 1 / 3,
+                "market_home_prob": 1 / 3,
+                "market_draw_prob": 1 / 3,
+                "market_away_prob": 1 / 3,
+                "model_home_prob": 1 / 3,
+                "model_draw_prob": 1 / 3,
+                "model_away_prob": 1 / 3,
+            }
+        ]
+    )
+    results = pd.DataFrame(
+        [
+            {
+                "match_id": "m1",
+                "home_score": 2,
+                "away_score": 0,
+                "result_status": "final",
+                "result_last_checked_utc": "2026-06-12T08:30:00Z",
+                "result_source": "test",
+                "result_notes": "",
+            }
+        ]
+    )
+
+    df = add_match_results(predictions, results)
+    row = df.iloc[0]
+
+    assert pd.isna(row["favorite_outcome"])
+    assert row["actual_outcome"] == "home"
+    assert row["favorite_result_status"] == "Favorit ukendt"
+
+
+def test_result_favorite_override_is_used():
+    predictions = pd.DataFrame(
+        [
+            {
+                "match_id": "m1",
+                "home_team": "Mexico",
+                "away_team": "South Africa",
+                "active_home_prob": 1 / 3,
+                "active_draw_prob": 1 / 3,
+                "active_away_prob": 1 / 3,
+            }
+        ]
+    )
+    results = pd.DataFrame(
+        [
+            {
+                "match_id": "m1",
+                "home_score": 2,
+                "away_score": 0,
+                "result_status": "final",
+                "result_favorite_outcome": "home",
+                "result_last_checked_utc": "2026-06-12T08:30:00Z",
+                "result_source": "test",
+                "result_notes": "",
+            }
+        ]
+    )
+
+    df = add_match_results(predictions, results)
+    row = df.iloc[0]
+
+    assert row["favorite_outcome"] == "home"
+    assert row["favorite_result_status"] == "Favoritten gik hjem"
+
+
 def test_split_active_and_archived_matches():
     results = pd.DataFrame(
         [
