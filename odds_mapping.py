@@ -221,7 +221,8 @@ def calculate_market_fair_probabilities_from_best_or_consensus(
 
 
 def _empty_mapped_fixture_row(fixture) -> dict:
-    return {
+    row = {column: pd.NA for column in NORMALIZED_ODDS_COLUMNS}
+    row.update({
         "match_id": fixture["match_id"],
         "kickoff_utc": _fixture_kickoff(fixture),
         "home_team": fixture["home_team"],
@@ -230,8 +231,8 @@ def _empty_mapped_fixture_row(fixture) -> dict:
         "stage": _fixture_stage(fixture),
         "matchday": fixture.get("matchday", 0),
         "odds_available": False,
-        **{column: pd.NA for column in NORMALIZED_ODDS_COLUMNS},
-    }
+    })
+    return row
 
 
 def _fixture_signature(row) -> tuple[str, str]:
@@ -279,6 +280,7 @@ def map_odds_to_fixtures(
     rows = []
     matched_match_ids = set()
     matched_event_ids = set()
+    unmatched_events = []
     normalized_odds = odds_df.copy() if odds_df is not None else pd.DataFrame()
     if normalized_odds.empty:
         for _, fixture in fixtures_df.iterrows():
@@ -289,7 +291,10 @@ def map_odds_to_fixtures(
     for event_id, event_df in normalized_odds.groupby("event_id", dropna=False):
         fixture, match_method = _match_odds_event_to_fixture(event_df, fixtures_df, kickoff_tolerance_hours)
         if fixture is None:
-            warnings.append(f"Odds event {event_id} could not be matched to an official fixture.")
+            first = event_df.iloc[0]
+            unmatched_events.append(
+                f"{event_id}: {first.get('home_team', '?')} vs {first.get('away_team', '?')} at {first.get('commence_time_utc', '?')}"
+            )
             continue
         matched_match_ids.add(fixture["match_id"])
         matched_event_ids.add(event_id)
@@ -313,7 +318,16 @@ def map_odds_to_fixtures(
     for _, fixture in fixtures_df.iterrows():
         if fixture["match_id"] not in matched_match_ids:
             rows.append(_empty_mapped_fixture_row(fixture))
-            warnings.append(f"No odds matched for fixture {fixture['match_id']}.")
+
+    missing_count = len(fixtures_df) - len(matched_match_ids)
+    if missing_count:
+        warnings.append(f"No odds matched for {missing_count} official fixtures. Fixtures remain visible without odds.")
+    if unmatched_events:
+        sample = "; ".join(unmatched_events[:3])
+        extra = f" Example: {sample}." if sample else ""
+        warnings.append(
+            f"Ignored {len(unmatched_events)} provider odds event(s) that are not in the official fixture reference.{extra}"
+        )
 
     result = pd.DataFrame(rows)
     return result, warnings

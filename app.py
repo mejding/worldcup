@@ -2178,7 +2178,10 @@ def page_settings() -> None:
     if st.button("Refresh odds now"):
         result = refresh_live_odds_and_predictions(force_refresh=True)
         for warning in result.get("warnings", []):
-            st.warning(warning)
+            if "Ignored" in str(warning) and "provider odds event" in str(warning):
+                st.info(warning)
+            else:
+                st.warning(warning)
         if result.get("last_error"):
             st.warning(result["last_error"])
         st.session_state.data_mode = "live"

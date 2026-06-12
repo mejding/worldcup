@@ -177,7 +177,7 @@ def test_maps_odds_to_fixture_by_match_id():
 
     assert mapped[mapped["odds_available"] == True]["match_id"].nunique() == 1
     assert "WC2026-GRA-001" in set(mapped["match_id"])
-    assert any("WC2026-GRB-001" in warning for warning in warnings)
+    assert any("No odds matched for 1 official fixtures" in warning for warning in warnings)
 
 
 def test_maps_odds_to_fixture_by_team_names_and_kickoff_tolerance():
@@ -194,6 +194,8 @@ def test_unmatched_fixture_remains_visible():
 
     assert len(mapped) == 2
     assert mapped["odds_available"].eq(False).all()
+    assert set(mapped["home_team"]) == {"Mexico", "Canada"}
+    assert set(mapped["away_team"]) == {"South Africa", "Bosnia and Herzegovina"}
 
 
 def test_team_name_normalization_variations():
@@ -227,3 +229,13 @@ def test_danske_spil_unavailable_does_not_create_fake_odds():
 
     assert pd.isna(row["ds_home_odds"])
     assert row["best_home_odds"] == pytest.approx(1.5)
+
+
+def test_unmatched_provider_events_are_summarized_not_reported_as_hard_match_errors():
+    odds = _normalized_odds(event_id="provider-event", home_team="Brazil", away_team="Japan")
+
+    mapped, warnings = map_odds_to_fixtures(_fixtures(), odds)
+
+    assert mapped["odds_available"].eq(False).all()
+    assert any("Ignored 1 provider odds event" in warning for warning in warnings)
+    assert not any("could not be matched" in warning for warning in warnings)
