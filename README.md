@@ -81,7 +81,7 @@ streamlit run app.py
 
 Each recommendation uses `edge = active_probability * odds - 1`. Kelly stake is calculated from the current bankroll, not starting bankroll, because stake sizing should reflect the money currently available.
 
-The active probability source may be market, historical model, draw-context model or ensemble. If market/model/active percentages are identical, the app is likely using market fallback because model predictions have not been applied.
+The normal UI shows one label: `Best available prediction`. Internally this can use a validated ensemble, the bundled pre-trained model or market probabilities as fallback.
 
 ## Pre-Trained Prediction Flow
 
@@ -90,10 +90,10 @@ The app is designed so normal users do not need to train or apply models manuall
 - Bundled model artifacts live in `data/models/model.pkl`, `data/models/model_metadata.json` and `data/models/feature_columns.json`.
 - On startup, the app checks for model artifacts and automatically prepares upcoming-match predictions when possible.
 - The primary UI shows the decision, not the modelling machinery: favorite, probabilities, No bet/Playable/Better elsewhere, bookmaker and stake.
-- The app still uses the best validated probability source. A bundled model is not used blindly if market probabilities or an ensemble are configured as the better validated source.
-- If model files are missing or cannot be applied, the app falls back to market-implied probabilities and keeps the normal user flow working.
+- If model files are missing or cannot be applied, the app falls back to market probabilities and keeps the normal user flow working.
+- `data/historical/international_results.csv` is developer training input only. It is not required at runtime when pre-trained artifacts are bundled.
 
-Manual retraining, model application, backtests, draw-context analysis, ensemble comparison and odds refresh are admin/developer actions under `Admin / Settings`, `Backtest & Metrics`, `Draw Hypothesis` and `Ensemble`.
+Manual retraining, backtests, draw-context analysis, ensemble comparison and odds refresh are admin/developer actions under `Advanced / Admin`.
 
 ## Fixture Data
 
@@ -322,7 +322,9 @@ Odds APIs may not include Danske Spil or all World Cup fixtures at all times. Th
 
 ## Historical Model
 
-Sprint 6 adds the first historical international football model. It is intentionally simple: a multinomial logistic regression predicting home win, draw and away win.
+Sprint 6 added the first historical international football model. It is intentionally simple: a multinomial logistic regression predicting home win, draw and away win.
+
+Normal users do not need historical data. The deployed app should ship with pre-trained artifacts in `data/models/`.
 
 Place historical data here:
 
@@ -347,12 +349,17 @@ The model uses broader international football data rather than World Cup-only da
 
 Current features include tournament flags, team historical win/draw/loss rates, recent form, goals for/against, relative differences and simple Elo features. Features are generated using only matches before the match being predicted.
 
-Train from the Streamlit Settings page with `Train/update historical model`, then apply it to current matches with `Apply model to current matches`.
+Developer training workflow:
+
+1. Add historical training data at `data/historical/international_results.csv`.
+2. Run the export script.
+3. Commit or deploy the generated artifacts in `data/models/`.
+4. Open the app. It loads pre-trained artifacts automatically.
 
 Command-line training is also available:
 
 ```bash
-python train_model.py --input data/historical/international_results.csv
+python scripts/train_and_export_model.py --input data/historical/international_results.csv
 ```
 
 Metrics shown:
@@ -371,7 +378,7 @@ Sprint 7 adds time-based model backtesting. The backtest currently evaluates the
 
 The app uses walk-forward backtesting because football prediction is a chronological problem: a model should only train on matches that happened before the matches it predicts. A random split is not appropriate for reporting because it can mix future information into training, especially through team form, Elo and tournament context features.
 
-Run the backtest from the `Backtest & Metrics` page:
+Run the backtest from `Advanced / Admin`:
 
 1. Add historical data at `data/historical/international_results.csv`.
 2. Choose an initial train end date, test window, step size and minimum training matches.
@@ -417,11 +424,11 @@ These are not exact qualification simulations.
 
 Draw-context features include major tournament group flags, World Cup group flags, group matchday flags, even-match and heavy-favorite indicators, must-win indicators, draw-sufficient indicators, mutual draw acceptance and an explainable `draw_context_score` from 0 to 100. The score is explanatory and may be used as a model feature, but it does not manually override probabilities.
 
-Run this from the `Draw Hypothesis` page:
+Run this from `Advanced / Admin`:
 
 1. Click `Run draw hypothesis analysis` to create draw-rate segment outputs and a report.
 2. Click `Compare baseline vs draw-context model` to run both walk-forward variants.
-3. Review the decision card before enabling draw-context features in Settings.
+3. Review the decision card before enabling draw-context features in developer settings.
 
 Output files:
 

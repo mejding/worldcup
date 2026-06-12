@@ -116,7 +116,7 @@ from historical_data import load_historical_results, standardize_historical_resu
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import refresh_live_odds_and_predictions
 from match_results import add_match_results, split_active_and_archived_matches
-from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status
+from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status, get_model_readiness
 from odds_provider import get_odds_source_status
 from odds_utils import calculate_edge
 from probability_sources import (
@@ -203,9 +203,9 @@ def _empty_historical_results() -> pd.DataFrame:
 def prepare_best_available_predictions() -> list[str]:
     messages = []
     model_status = get_active_model_status()
-    if not model_status["model_exists"]:
+    if not model_status["artifacts_ready"]:
         st.session_state.model_source = "market_only"
-        messages.append("Pre-trained model unavailable. The app is using market-implied probabilities as a fallback.")
+        messages.append("Predictions are currently based on market odds because the pre-trained model is unavailable.")
         return messages
 
     try:
@@ -241,6 +241,8 @@ def prepare_best_available_predictions() -> list[str]:
             )
             messages.extend(model_warnings)
             messages.append("Model loaded. Predictions are being generated for upcoming matches.")
+        else:
+            messages.append("Pre-trained model loaded.")
         st.session_state.model_source = "historical_model_if_available"
     except Exception as exc:
         st.session_state.model_source = "market_only"
@@ -900,11 +902,13 @@ def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
         user_facing = [
             warning for warning in unique_warnings
             if "model unavailable" in warning.lower()
+            or "pre-trained model unavailable" in warning.lower()
+            or "pre-trained model is unavailable" in warning.lower()
             or "market-implied probabilities" in warning.lower()
             or "market probabilities" in warning.lower()
         ]
         for warning in user_facing[:1]:
-            st.info("Predictions are currently based on market probabilities because the pre-trained model is unavailable or not applied.")
+            st.info("Predictions are currently based on market odds because the pre-trained model is unavailable.")
     else:
         for warning in unique_warnings:
             text = str(warning)
@@ -1765,20 +1769,22 @@ def page_model_performance() -> None:
     st.title("Model Performance")
     st.caption("A simple quality summary for the prediction engine.")
     model_status = get_active_model_status()
+    readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     backtest_status = get_latest_backtest_status()
 
     st.subheader("Best prediction source")
     metric_row(
         [
             ("Prediction source", "Best available"),
-            ("Model available", "Yes" if model_status["model_exists"] else "No"),
+            ("Pre-trained model", "Loaded" if readiness["artifacts_ready"] else "Fallback"),
             ("Training rows", str(model_status["number_of_training_rows"])),
             ("Test rows", str(model_status["number_of_test_rows"])),
         ]
     )
+    st.info(readiness["normal_user_message"])
     st.caption(
         "The app automatically uses the best available prediction source. "
-        "This may combine market odds and model predictions."
+        "If the pre-trained model is unavailable, it falls back to market probabilities."
     )
 
     st.subheader("Performance")
@@ -1793,7 +1799,7 @@ def page_model_performance() -> None:
             ]
         )
         st.caption("Performance is calculated on historical matches where the result is known.")
-    elif model_status["model_exists"] and model_status["accuracy"] is not None:
+    elif readiness["artifacts_ready"] and model_status["accuracy"] is not None:
         metric_row(
             [
                 ("Accuracy", format_percentage(model_status["accuracy"])),
@@ -1989,8 +1995,7 @@ def page_backtest_metrics() -> None:
     st.caption(f"Last backtest file update: {status['last_modified'] or '-'}")
     if not historical_exists:
         st.warning(
-            "Historical match data is missing, so new model tests cannot be run yet. "
-            "Add data/historical/international_results.csv with results before running Backtest or World Cup sanity check."
+            "Historical training data is not available in this deployment. Retraining and new backtests are disabled."
         )
 
     st.subheader("Run backtest")
@@ -2003,7 +2008,7 @@ def page_backtest_metrics() -> None:
     with run_col:
         if st.button("Run walk-forward backtest"):
             if not historical_exists:
-                st.error("No historical data file found. Add data/historical/international_results.csv first.")
+                st.error("Retraining is unavailable because historical training data is not included in this deployment.")
             else:
                 try:
                     raw = load_historical_results(HISTORICAL_RESULTS_PATH)
@@ -2030,7 +2035,7 @@ def page_backtest_metrics() -> None:
     with wc_col:
         if st.button("Run World Cup sanity check"):
             if not historical_exists:
-                st.error("No historical data file found.")
+                st.error("World Cup sanity check is unavailable because historical training data is not included in this deployment.")
             else:
                 try:
                     raw = load_historical_results(HISTORICAL_RESULTS_PATH)
@@ -2176,7 +2181,7 @@ def page_draw_hypothesis(df: pd.DataFrame) -> None:
     st.subheader("Run draw hypothesis analysis")
     if st.button("Run draw hypothesis analysis"):
         if not historical_exists:
-            st.error("No historical data file found. Add data/historical/international_results.csv first.")
+            st.error("Draw hypothesis analysis is unavailable because historical training data is not included in this deployment.")
         elif errors:
             st.error("Historical data must be valid before running the analysis.")
         else:
@@ -2216,7 +2221,7 @@ def page_draw_hypothesis(df: pd.DataFrame) -> None:
     min_train_matches = c4.number_input("Min train matches", min_value=30, value=1000, step=100, key="draw_cmp_min")
     if st.button("Compare baseline vs draw-context model"):
         if not historical_exists:
-            st.error("No historical data file found.")
+            st.error("Model comparison is unavailable because historical training data is not included in this deployment.")
         elif errors:
             st.error("Historical data must be valid before running model comparison.")
         else:
@@ -2506,26 +2511,33 @@ def page_settings() -> None:
     st.caption("Changing source recalculates active probabilities and Kelly recommendations on the next app run.")
 
     status = get_active_model_status()
+    readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     cols = st.columns(4)
     with cols[0]:
-        metric_card("Model available", "Yes" if status["model_exists"] else "No")
+        metric_card("Pre-trained artifacts", "Found" if readiness["artifacts_ready"] else "Missing")
     with cols[1]:
-        metric_card("Training rows", str(status["number_of_training_rows"]))
+        metric_card("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing")
     with cols[2]:
-        metric_card("Accuracy", "-" if status["accuracy"] is None else format_percentage(status["accuracy"]))
+        metric_card("Retraining", "Available" if readiness["retraining_available"] else "Disabled")
     with cols[3]:
-        metric_card("Log loss", "-" if status["log_loss"] is None else f"{status['log_loss']:.3f}")
+        metric_card("Accuracy", "-" if status["accuracy"] is None else format_percentage(status["accuracy"]))
+    log_loss_text = "-" if status["log_loss"] is None else f"{status['log_loss']:.3f}"
     brier_text = "-" if status["brier_score"] is None else f"{status['brier_score']:.3f}"
     draw_actual = "-" if status["draw_rate_actual"] is None else format_percentage(status["draw_rate_actual"])
     draw_predicted = "-" if status["draw_rate_predicted"] is None else format_percentage(status["draw_rate_predicted"])
+    st.info(readiness["normal_user_message"])
+    if not readiness["historical_csv_exists"]:
+        st.warning(readiness["admin_training_message"])
     st.caption(
-        f"Trained at: {status['trained_at'] or '-'} | Test rows: {status['number_of_test_rows']} | "
+        f"Model version: {status['model_version'] or '-'} | Trained at: {status['trained_at'] or '-'} | "
+        f"Training rows: {status['number_of_training_rows']} | Test rows: {status['number_of_test_rows']} | "
+        f"Log loss: {log_loss_text} | "
         f"Brier: {brier_text} | Draw actual/predicted: {draw_actual} / {draw_predicted}"
     )
 
     train_col, apply_col = st.columns(2)
     with train_col:
-        if st.button("Train/update historical model"):
+        if st.button("Train/update historical model", disabled=not readiness["retraining_available"]):
             try:
                 raw = load_historical_results(HISTORICAL_RESULTS_PATH)
                 hist_warnings, hist_errors = validate_historical_results(raw)
@@ -2549,17 +2561,20 @@ def page_settings() -> None:
                         f"log loss: {metadata['metrics']['log_loss']:.3f}"
                     )
             except FileNotFoundError:
-                st.error("No historical data file found. Add data/historical/international_results.csv to train the model.")
+                st.error("Retraining is unavailable because historical training data is not included in this deployment.")
             except ValueError as exc:
                 st.error(str(exc))
             except Exception as exc:
                 st.error(f"Could not train model: {exc}")
     with apply_col:
-        if st.button("Apply model to current matches"):
+        if st.button("Apply pre-trained model to current matches", disabled=not readiness["artifacts_ready"]):
             try:
                 base_df, _, actual_mode = load_predictions_by_mode(st.session_state.data_mode, model_source="market_only")
-                raw = load_historical_results(HISTORICAL_RESULTS_PATH)
-                standardized = standardize_historical_results(raw)
+                if HISTORICAL_RESULTS_PATH.exists():
+                    raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                    standardized = standardize_historical_results(raw)
+                else:
+                    standardized = _empty_historical_results()
                 output_path = LIVE_PREDICTIONS_WITH_MODEL_PATH if actual_mode == "live" else MODEL_PREDICTIONS_PATH
                 _, model_warnings = predict_upcoming_matches(
                     base_df,
@@ -2573,7 +2588,7 @@ def page_settings() -> None:
                 st.success("Historical model probabilities applied to current matches.")
                 st.rerun()
             except FileNotFoundError:
-                st.error("No historical data file or trained model found. Train the model first.")
+                st.error("Pre-trained model artifacts are missing. The app will use market probabilities as fallback.")
             except Exception as exc:
                 st.error(f"Could not apply model: {exc}")
 
