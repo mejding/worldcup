@@ -7,10 +7,8 @@ PAGES = [
     {"key": "Match Overview", "label": "Match Overview", "icon": "⚽", "group": "main"},
     {"key": "Betting Center", "label": "Betting Center", "icon": "🎯", "group": "main"},
     {"key": "My Bets", "label": "My Bets", "icon": "🧾", "group": "main"},
-    {"key": "Match Archive", "label": "Match Archive", "icon": "📅", "group": "main"},
-    {"key": "Match Detail", "label": "Match Detail", "icon": "🔎", "group": "advanced"},
-    {"key": "Model & Data", "label": "Model & Data", "icon": "📊", "group": "advanced"},
-    {"key": "Settings", "label": "Settings", "icon": "⚙️", "group": "advanced"},
+    {"key": "Model Performance", "label": "Model Performance", "icon": "📊", "group": "main"},
+    {"key": "Settings", "label": "Settings", "icon": "⚙️", "group": "main"},
     {"key": "Advanced / Admin", "label": "Advanced / Admin", "icon": "🛠", "group": "advanced"},
 ]
 

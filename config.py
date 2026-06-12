@@ -80,7 +80,7 @@ PREFERRED_BOOKMAKER_NAMES = ["Danske Spil", "DanskeSpil", "Danske Spil A/S", "da
 
 STAKING_PROFILES = {
     "Conservative": {
-        "fractional_kelly_multiplier": 0.25,
+        "fractional_kelly_multiplier": 0.20,
         "max_stake_pct_of_bankroll": 0.015,
         "min_edge_threshold": 0.03,
         "min_stake_pct_threshold": 0.0025,
@@ -91,14 +91,8 @@ STAKING_PROFILES = {
         "min_edge_threshold": 0.025,
         "min_stake_pct_threshold": 0.0025,
     },
-    "Offensive": {
-        "fractional_kelly_multiplier": 0.33,
-        "max_stake_pct_of_bankroll": 0.03,
-        "min_edge_threshold": 0.02,
-        "min_stake_pct_threshold": 0.0025,
-    },
     "Aggressive": {
-        "fractional_kelly_multiplier": 0.50,
+        "fractional_kelly_multiplier": 0.33,
         "max_stake_pct_of_bankroll": 0.04,
         "min_edge_threshold": 0.02,
         "min_stake_pct_threshold": 0.0025,

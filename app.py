@@ -154,6 +154,9 @@ def init_session_state() -> None:
         st.session_state.kelly_profile_name = DEFAULT_PROFILE_NAME
     if "staking_profile" not in st.session_state:
         st.session_state.staking_profile = get_staking_profile(DEFAULT_PROFILE_NAME)
+    if st.session_state.kelly_profile_name not in STAKING_PROFILES:
+        st.session_state.kelly_profile_name = DEFAULT_PROFILE_NAME
+        st.session_state.staking_profile = get_staking_profile(DEFAULT_PROFILE_NAME)
     if "preferred_bookmaker" not in st.session_state:
         st.session_state.preferred_bookmaker = PREFERRED_BOOKMAKER
     if "selected_match_id" not in st.session_state:
@@ -403,6 +406,21 @@ def row_has_displayable_probabilities(row) -> bool:
     )
 
 
+def probability_triplets_are_identical(row, prefixes: tuple[str, ...] = ("market", "model", "active")) -> bool:
+    triplets = []
+    for prefix in prefixes:
+        values = [
+            pd.to_numeric(row.get(f"{prefix}_home_prob"), errors="coerce"),
+            pd.to_numeric(row.get(f"{prefix}_draw_prob"), errors="coerce"),
+            pd.to_numeric(row.get(f"{prefix}_away_prob"), errors="coerce"),
+        ]
+        if any(pd.isna(value) for value in values):
+            return False
+        triplets.append([float(value) for value in values])
+    first = triplets[0]
+    return all(all(abs(a - b) < 0.0001 for a, b in zip(first, triplet)) for triplet in triplets[1:])
+
+
 def format_probability_for_row(row, column: str) -> str:
     if not row_has_displayable_probabilities(row):
         return "-"
@@ -412,6 +430,10 @@ def format_probability_for_row(row, column: str) -> str:
 def probability_source_label(row) -> str:
     if not row_has_displayable_probabilities(row):
         return "Afventer odds/model"
+    return "Best available"
+
+
+def technical_probability_source_label(row) -> str:
     source = row.get("active_probability_source", st.session_state.probability_source)
     label = PROBABILITY_SOURCE_LABELS.get(source, source)
     if source == "ensemble" and not pd.isna(row.get("ensemble_w_market")):
@@ -799,18 +821,20 @@ def show_sidebar() -> None:
         "Bet Log": "My Bets",
         "Bankroll": "My Bets",
         "Analytics": "My Bets",
-        "About": "Model & Data",
+        "About": "Model Performance",
+        "Model & Data": "Advanced / Admin",
         "Admin / Settings": "Advanced / Admin",
-        "Backtest & Metrics": "Model & Data",
-        "Draw Hypothesis": "Model & Data",
-        "Ensemble": "Model & Data",
+        "Backtest & Metrics": "Model Performance",
+        "Draw Hypothesis": "Advanced / Admin",
+        "Ensemble": "Advanced / Admin",
     }
     page_keys = [page["key"] for page in PAGES]
+    allowed_pages = set(page_keys) | {"Match Detail", "Match Archive", "Model & Data"}
     requested_page = page_aliases.get(st.session_state.get("page", "Match Overview"), st.session_state.get("page", "Match Overview"))
     active_page = page_aliases.get(st.session_state.get("current_page", requested_page), st.session_state.get("current_page", requested_page))
-    if requested_page != active_page and requested_page in page_keys:
+    if requested_page != active_page and requested_page in allowed_pages:
         active_page = requested_page
-    if active_page not in page_keys:
+    if active_page not in allowed_pages:
         active_page = "Match Overview"
     st.session_state.current_page = active_page
     st.session_state.page = active_page
@@ -845,19 +869,16 @@ def show_sidebar() -> None:
         "cached": "Cached snapshot",
         "missing": "Missing",
     }.get(odds_status["active_odds_source"], odds_status["active_odds_source"].title())
-    if odds_status["active_odds_source"] in {"api", "manual", "cached"}:
-        odds_label = f"{odds_label} · refresh required"
+    if freshness["last_modified"] and odds_status["active_odds_source"] != "missing":
+        odds_label = f"{odds_label} · {freshness['last_modified']}"
 
     st.sidebar.markdown('<div class="wc-sidebar-status-title">Status</div>', unsafe_allow_html=True)
     render_sidebar_status_card("Bankroll", f"{format_dkk(state['current_bankroll'])} · {format_dkk(net)} / {format_percentage(ret)}")
-    render_sidebar_status_card(
-        "Source",
-        PROBABILITY_SOURCE_LABELS.get(st.session_state.probability_source, st.session_state.probability_source),
-    )
+    render_sidebar_status_card("Prediction", "Best available")
     render_sidebar_status_card("Odds", odds_label)
     render_sidebar_status_card(
         "Data",
-        f"{st.session_state.active_data_mode.title()} · {freshness['row_count']} rows · {freshness['last_modified'] or '-'}",
+        f"Live data · {freshness['row_count']} rows",
     )
     if st.session_state.active_data_mode == "live":
         render_sidebar_status_card("API key", "Configured" if get_secret_or_env("ODDS_API_KEY") else "Missing")
@@ -865,8 +886,17 @@ def show_sidebar() -> None:
 
 def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
     unique_warnings = list(dict.fromkeys(str(warning) for warning in warnings))
-    normal_pages = {"Match Overview", "Match Archive", "Betting Center", "My Bets", "Match Detail"}
-    if unique_warnings and st.session_state.page in normal_pages:
+    normal_pages = {
+        "Match Overview",
+        "Match Archive",
+        "Betting Center",
+        "My Bets",
+        "Match Detail",
+        "Model Performance",
+        "Settings",
+    }
+    active_page = st.session_state.get("current_page", st.session_state.get("page", "Match Overview"))
+    if unique_warnings and active_page in normal_pages:
         user_facing = [
             warning for warning in unique_warnings
             if "model unavailable" in warning.lower()
@@ -875,9 +905,6 @@ def show_validation_messages(warnings: list[str], errors: list[str]) -> None:
         ]
         for warning in user_facing[:1]:
             st.info("Predictions are currently based on market probabilities because the pre-trained model is unavailable or not applied.")
-        with st.expander("Data notes", expanded=False):
-            for warning in unique_warnings:
-                st.caption(warning)
     else:
         for warning in unique_warnings:
             text = str(warning)
@@ -980,8 +1007,9 @@ def compact_match_card(row) -> None:
             </div>
             <div class="{status_class} wc-match-status">{status}</div>
           </div>
-          <div class="wc-match-line"><b>Favorite:</b> {html.escape(prediction['favorite'])} · {html.escape(prediction['line'])}</div>
-          <div class="wc-match-line"><b>Decision:</b> {html.escape(betting_decision_summary(row))} · <b>DS:</b> {html.escape(recommendation_summary(row, 'ds'))} · <b>Best:</b> {html.escape(recommendation_summary(row, 'best'))}</div>
+          <div class="wc-match-line"><b>Favorite:</b> {html.escape(prediction['favorite'])}</div>
+          <div class="wc-match-line"><b>Prediction:</b> {html.escape(prediction['line'])}</div>
+          <div class="wc-match-line"><b>Betting decision:</b> {html.escape(betting_decision_summary(row))} · <b>Danske Spil:</b> {html.escape(recommendation_summary(row, 'ds'))} · <b>Best market:</b> {html.escape(recommendation_summary(row, 'best'))}</div>
           <div class="wc-match-reason">{html.escape(reason)}</div>
         </div>
         """,
@@ -998,10 +1026,14 @@ def page_overview(df: pd.DataFrame) -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.caption(fixture_provenance_text(st.session_state.active_data_mode, df))
+    st.caption(f"Live data · {len(active_df)} upcoming matches · Prediction source: Best available")
     st.caption(odds_provenance_text(active_df))
     if not archived_df.empty:
         st.caption(f"{len(archived_df)} afviklede kampe er flyttet til Match Archive.")
+        if st.button("View archive", key="overview_view_archive"):
+            st.session_state.page = "Match Archive"
+            st.session_state.current_page = "Match Archive"
+            st.rerun()
     if st.session_state.active_data_mode == "sample":
         st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
     if active_df.empty:
@@ -1033,11 +1065,7 @@ def page_overview(df: pd.DataFrame) -> None:
         st.info(
             "Live mode uses fetched odds and the best available prediction source. If model predictions cannot be generated, market probabilities are used as fallback."
         )
-    active_source = df["active_probability_source"].iloc[0] if "active_probability_source" in df.columns and not df.empty else st.session_state.probability_source
-    st.markdown(
-        f"Prediction source: {probability_source_badge('best_validated' if st.session_state.probability_source == 'best_validated' else active_source)}",
-        unsafe_allow_html=True,
-    )
+    st.caption("Prediction source: Best available")
 
     with st.expander("Filtre", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
@@ -1174,12 +1202,10 @@ def render_ds_no_bet_row(row) -> None:
 def page_betting_center(df: pd.DataFrame) -> None:
     df, archived = split_active_and_archived_matches(df)
     st.title("Betting Center")
-    st.caption("Alt omkring spilforslag, bet slip, bankroll og bet history samlet ét sted.")
+    st.caption("Value bets, Danske Spil checks, best market odds and your bet slip.")
     if not archived.empty:
         st.caption(f"{len(archived)} afviklede kampe er flyttet til Match Archive og er ikke spilbare her.")
-    value_tab, ds_tab, best_tab, slip_tab, bankroll_tab, history_tab = st.tabs(
-        ["Value bets", "Danske Spil", "Best market", "Bet slip", "Bankroll", "Bet history"]
-    )
+    value_tab, ds_tab, best_tab, slip_tab = st.tabs(["Value bets", "Danske Spil", "Best market", "Bet slip"])
 
     with value_tab:
         value_df = df[df["recommendation_status"].isin(["Playable at Danske Spil", "Better elsewhere"])].copy()
@@ -1242,12 +1268,6 @@ def page_betting_center(df: pd.DataFrame) -> None:
                 st.session_state.bet_slip = []
                 st.rerun()
 
-    with bankroll_tab:
-        page_bankroll()
-
-    with history_tab:
-        page_bet_log()
-
 
 def page_match_detail(df: pd.DataFrame) -> None:
     if df.empty:
@@ -1275,6 +1295,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
         metric_card("Prediction", prediction["line"])
     with h3:
         metric_card("Betting decision", row["recommendation_status"], betting_decision_summary(row))
+    st.caption("Prediction source: Best available")
 
     has_displayable_probabilities = row_has_displayable_probabilities(row)
     if has_displayable_probabilities:
@@ -1349,7 +1370,9 @@ def page_match_detail(df: pd.DataFrame) -> None:
     )
 
     with st.expander("Advanced probability details"):
-        st.caption(f"Active recommendation source: {probability_source_label(row)}")
+        st.caption(f"Technical source: {technical_probability_source_label(row)}")
+        if probability_triplets_are_identical(row):
+            st.info("These values are identical because the app is currently using market probabilities as fallback.")
         if not has_displayable_probabilities:
             empty_state("Sandsynligheder afventer odds eller en modelkørsel. 33/33/33-placeholders vises ikke som rigtige prognoser.")
         else:
@@ -1738,18 +1761,81 @@ def page_model_data(df: pd.DataFrame) -> None:
         st.dataframe(fixtures, width="stretch", hide_index=True)
 
 
+def page_model_performance() -> None:
+    st.title("Model Performance")
+    st.caption("A simple quality summary for the prediction engine.")
+    model_status = get_active_model_status()
+    backtest_status = get_latest_backtest_status()
+
+    st.subheader("Best prediction source")
+    metric_row(
+        [
+            ("Prediction source", "Best available"),
+            ("Model available", "Yes" if model_status["model_exists"] else "No"),
+            ("Training rows", str(model_status["number_of_training_rows"])),
+            ("Test rows", str(model_status["number_of_test_rows"])),
+        ]
+    )
+    st.caption(
+        "The app automatically uses the best available prediction source. "
+        "This may combine market odds and model predictions."
+    )
+
+    st.subheader("Performance")
+    if backtest_status["backtest_exists"] and backtest_status["prediction_count"] > 0:
+        metric_row(
+            [
+                ("Accuracy", "-" if pd.isna(backtest_status["overall_accuracy"]) else format_percentage(backtest_status["overall_accuracy"])),
+                ("Log loss", "-" if pd.isna(backtest_status["overall_log_loss"]) else f"{backtest_status['overall_log_loss']:.3f}"),
+                ("Brier score", "-" if pd.isna(backtest_status["overall_brier_score"]) else f"{backtest_status['overall_brier_score']:.3f}"),
+                ("Calibration error", "-" if pd.isna(backtest_status["overall_ece"]) else f"{backtest_status['overall_ece']:.3f}"),
+                ("Matches", str(backtest_status["prediction_count"])),
+            ]
+        )
+        st.caption("Performance is calculated on historical matches where the result is known.")
+    elif model_status["model_exists"] and model_status["accuracy"] is not None:
+        metric_row(
+            [
+                ("Accuracy", format_percentage(model_status["accuracy"])),
+                ("Log loss", f"{model_status['log_loss']:.3f}" if model_status["log_loss"] is not None else "-"),
+                ("Brier score", f"{model_status['brier_score']:.3f}" if model_status["brier_score"] is not None else "-"),
+                ("Calibration error", "-"),
+                ("Matches", str(model_status["number_of_test_rows"])),
+            ]
+        )
+        st.caption("Showing bundled model holdout metrics. Full backtest results have not been calculated yet.")
+    else:
+        empty_state("Model performance has not been calculated yet.")
+        st.caption("Performance is calculated on historical matches where the result is known.")
+
+    with st.expander("Advanced model comparison"):
+        st.caption("Detailed backtest, ensemble and draw-context diagnostics are available in Advanced / Admin.")
+        comparison_df = _load_optional_csv(DRAW_FEATURE_COMPARISON_PATH)
+        ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
+        if comparison_df.empty and ensemble_df.empty:
+            empty_state("No advanced comparison results yet.")
+        if not comparison_df.empty:
+            st.subheader("Historical vs draw-context")
+            st.dataframe(comparison_df, width="stretch", hide_index=True)
+        if not ensemble_df.empty:
+            st.subheader("Market/model/ensemble")
+            st.dataframe(ensemble_df, width="stretch", hide_index=True)
+
+
 def page_advanced_admin(df: pd.DataFrame) -> None:
     st.title("Advanced / Admin")
     st.warning("These actions are for development/admin use. Normal users do not need to run them.")
-    settings_tab, backtest_tab, draw_tab, ensemble_tab, fixture_tab = st.tabs(
-        ["Settings & actions", "Run backtest", "Draw hypothesis", "Ensemble actions", "Validate fixtures"]
+    data_tab, model_tab, backtest_tab, ensemble_tab, fixture_tab, debug_tab = st.tabs(
+        ["Data readiness", "Model training", "Backtest", "Ensemble", "Fixture validation", "Debug"]
     )
-    with settings_tab:
+    with data_tab:
+        st.subheader("Data readiness")
         page_settings()
+    with model_tab:
+        st.subheader("Historical model")
+        page_draw_hypothesis(df)
     with backtest_tab:
         page_backtest_metrics()
-    with draw_tab:
-        page_draw_hypothesis(df)
     with ensemble_tab:
         page_ensemble(df)
     with fixture_tab:
@@ -1760,35 +1846,53 @@ def page_advanced_admin(df: pd.DataFrame) -> None:
         for message in messages:
             st.warning(message)
         st.dataframe(fixtures, width="stretch", hide_index=True)
+    with debug_tab:
+        st.subheader("App health")
+        st.dataframe(app_health_rows(df), width="stretch", hide_index=True)
 
 
 def page_user_settings() -> None:
     st.title("Settings")
-    st.caption("Brugerindstillinger for data mode, Kelly staking og foretrukken bookmaker.")
-    st.subheader("Data mode")
-    mode_labels = {
-        "Official fixtures": "official",
-        "Sample/demo data": "sample",
-        "Live odds data": "live",
-    }
-    current_label = next(
-        label for label, value in mode_labels.items()
-        if value == st.session_state.data_mode
-    )
-    selected_mode_label = st.radio(
-        "Choose data source",
-        list(mode_labels.keys()),
-        index=list(mode_labels.keys()).index(current_label),
-        horizontal=True,
-    )
-    st.session_state.data_mode = mode_labels[selected_mode_label]
-    st.caption(fixture_provenance_text(st.session_state.data_mode))
-    if st.session_state.data_mode == "sample":
-        st.warning("Sample/demo data is for UI testing only and is not official World Cup fixture data.")
+    st.caption("Simple app settings for bankroll, risk and odds updates.")
 
-    st.subheader("Staking")
+    st.subheader("Bankroll")
+    st.caption("Used to calculate suggested stake.")
+    state = load_bankroll_state()
+    net = state["current_bankroll"] - state["starting_bankroll"]
+    metric_row(
+        [
+            ("Current bankroll", format_dkk(state["current_bankroll"])),
+            ("Starting bankroll", format_dkk(state["starting_bankroll"])),
+            ("Return", f"{format_dkk(net)} / {format_percentage(net / state['starting_bankroll'] if state['starting_bankroll'] else 0)}"),
+        ]
+    )
+    with st.form("settings_bankroll_update"):
+        c1, c2 = st.columns([1, 2])
+        amount = c1.number_input("Bankroll adjustment", value=0.0, step=10.0)
+        note = c2.text_input("Note", value="")
+        if st.form_submit_button("Update bankroll"):
+            try:
+                update_bankroll(amount, "manual correction", note=note)
+                st.success("Bankroll updated.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    with st.expander("Reset bankroll"):
+        st.warning("Resetting bankroll changes the starting and current bankroll. Existing bet log entries are not deleted.")
+        new_start = st.number_input("New starting bankroll", min_value=0.0, value=float(state["starting_bankroll"]), step=100.0)
+        confirm = st.checkbox("I understand this resets starting and current bankroll")
+        if st.button("Reset bankroll", disabled=not confirm):
+            try:
+                reset_bankroll(new_start)
+                st.success("Bankroll reset.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+    st.subheader("Risk profile")
+    st.caption("Controls how aggressively the app sizes suggested bets.")
     profile_name = st.selectbox(
-        "Kelly profile",
+        "Betting risk profile",
         list(STAKING_PROFILES.keys()),
         index=list(STAKING_PROFILES.keys()).index(st.session_state.kelly_profile_name),
     )
@@ -1799,30 +1903,38 @@ def page_user_settings() -> None:
     profile = current_profile()
     metric_row(
         [
-            ("Fractional Kelly", format_percentage(profile["fractional_kelly_multiplier"])),
+            ("Risk profile", profile_name),
             ("Max stake", format_percentage(profile["max_stake_pct_of_bankroll"])),
             ("Minimum edge", format_percentage(profile["min_edge_threshold"])),
-            ("Minimum stake", format_percentage(profile["min_stake_pct_threshold"])),
         ]
     )
-    st.session_state.preferred_bookmaker = st.text_input("Preferred bookmaker", st.session_state.preferred_bookmaker)
-    with st.expander("Advanced probability source"):
-        st.caption("Normal users can leave this on Best validated source.")
-        source_labels = {
-            "Best validated source": "best_validated",
-            "Market only": "market",
-            "Historical model": "historical_model",
-            "Draw-context model": "draw_context_model",
-            "Ensemble": "ensemble",
-        }
-        reverse_source_labels = {value: key for key, value in source_labels.items()}
-        selected_probability_source = st.selectbox(
-            "Kelly probability source",
-            list(source_labels.keys()),
-            index=list(source_labels.keys()).index(reverse_source_labels.get(st.session_state.probability_source, "Best validated source")),
-            key="user_probability_source",
-        )
-        st.session_state.probability_source = source_labels[selected_probability_source]
+
+    st.subheader("Odds update")
+    st.caption("Refreshes bookmaker odds used to calculate value.")
+    odds_status = get_odds_source_status()
+    live_freshness = get_data_freshness(LIVE_PREDICTIONS_PATH)
+    metric_row(
+        [
+            ("Odds", "Missing" if odds_status["active_odds_source"] == "missing" else "Active"),
+            ("Source", odds_status["active_odds_source"].replace("_", " ").title()),
+            ("Last updated", live_freshness["last_modified"] or "-"),
+        ]
+    )
+    if odds_status["active_odds_source"] == "missing":
+        st.warning("Live odds are missing. Add API key or manual odds.")
+    if st.button("Refresh odds"):
+        try:
+            with st.spinner("Refreshing odds..."):
+                result = refresh_live_odds_and_predictions(force_refresh=True)
+            for warning in result.get("warnings", []):
+                st.warning(warning)
+            st.success("Odds refreshed.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not refresh odds: {exc}")
+
+    st.subheader("Display")
+    st.caption("Live data uses official fixtures, updated odds and best available predictions. Demo mode is available only in Advanced / Admin.")
 
 
 def _load_optional_csv(path) -> pd.DataFrame:
@@ -2576,6 +2688,8 @@ elif current_page == "My Bets":
     page_my_bets()
 elif current_page == "Match Detail":
     page_match_detail(df)
+elif current_page == "Model Performance":
+    page_model_performance()
 elif current_page == "Model & Data":
     page_model_data(df)
 elif current_page == "Settings":
