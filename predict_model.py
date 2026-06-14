@@ -36,6 +36,49 @@ def prediction_file_uses_market_as_model(path: Union[str, Path]) -> bool:
     return bool(equal_rows.mean() >= 0.8)
 
 
+def apply_stored_model_predictions(
+    upcoming_df: pd.DataFrame,
+    stored_model_path: Union[str, Path],
+    output_path: Union[str, Path],
+) -> tuple[pd.DataFrame, list[str]]:
+    stored_model_path = Path(stored_model_path)
+    if not stored_model_path.exists() or stored_model_path.stat().st_size == 0:
+        raise FileNotFoundError("Stored model predictions are missing.")
+    if prediction_file_uses_market_as_model(stored_model_path):
+        raise ValueError("Stored model predictions use market fallback.")
+
+    stored = pd.read_csv(stored_model_path)
+    merge_columns = [
+        "match_id",
+        "model_home_prob",
+        "model_draw_prob",
+        "model_away_prob",
+        "model_probability_source",
+        "draw_context_score",
+        "draw_context_label",
+        "home_draw_utility",
+        "away_draw_utility",
+        "mutual_draw_acceptance",
+        "one_team_must_win",
+        "both_teams_draw_satisfied",
+    ]
+    available_columns = [column for column in merge_columns if column in stored.columns]
+    result = upcoming_df.drop(columns=[column for column in available_columns if column != "match_id" and column in upcoming_df.columns], errors="ignore")
+    result = result.merge(stored[available_columns], on="match_id", how="left")
+    for column in ["model_home_prob", "model_draw_prob", "model_away_prob"]:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    missing_model = result[["model_home_prob", "model_draw_prob", "model_away_prob"]].isna().any(axis=1)
+    if missing_model.any():
+        raise ValueError("Stored model predictions do not cover all upcoming matches.")
+    if "model_probability_source" not in result.columns:
+        result["model_probability_source"] = "historical_model"
+    result["model_probability_source"] = result["model_probability_source"].fillna("historical_model")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(output_path, index=False)
+    return result, []
+
+
 def predict_upcoming_matches(
     upcoming_df: pd.DataFrame,
     historical_df: pd.DataFrame,

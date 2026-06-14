@@ -3,7 +3,7 @@ import pytest
 
 from features import build_training_dataset
 from historical_data import standardize_historical_results
-from predict_model import predict_upcoming_matches, prediction_file_uses_market_as_model
+from predict_model import apply_stored_model_predictions, predict_upcoming_matches, prediction_file_uses_market_as_model
 from train_model import train_historical_model
 
 
@@ -116,3 +116,25 @@ def test_prediction_file_uses_market_as_model_allows_distinct_model(tmp_path):
     _upcoming().to_csv(path, index=False)
 
     assert prediction_file_uses_market_as_model(path) is False
+
+
+def test_apply_stored_model_predictions_merges_ml_into_live_rows(tmp_path):
+    stored_path = tmp_path / "stored.csv"
+    output_path = tmp_path / "live_with_model.csv"
+    _upcoming().assign(model_probability_source="historical_model").to_csv(stored_path, index=False)
+    live = _upcoming().assign(
+        model_home_prob=0.45,
+        model_draw_prob=0.25,
+        model_away_prob=0.30,
+        market_home_prob=0.50,
+        market_draw_prob=0.25,
+        market_away_prob=0.25,
+    )
+
+    result, warnings = apply_stored_model_predictions(live, stored_path, output_path)
+
+    assert warnings == []
+    assert output_path.exists()
+    assert result.iloc[0]["model_probability_source"] == "historical_model"
+    assert result.iloc[0]["model_home_prob"] == pytest.approx(0.4)
+    assert result.iloc[0]["market_home_prob"] == pytest.approx(0.5)

@@ -126,7 +126,7 @@ from probability_sources import (
     load_active_probability_source,
     save_active_probability_source,
 )
-from predict_model import predict_upcoming_matches, prediction_file_uses_market_as_model
+from predict_model import apply_stored_model_predictions, predict_upcoming_matches, prediction_file_uses_market_as_model
 from recommendations import add_recommendations
 from time_utils import add_danish_kickoff_column, format_danish_kickoff
 from tooltip_definitions import TOOLTIPS
@@ -278,6 +278,19 @@ def prepare_best_available_predictions() -> list[str]:
             should_generate = True
             messages.append("Existing model prediction file used market probabilities as fallback. Regenerating ML predictions.")
         if should_generate:
+            if actual_mode == "live" and MODEL_PREDICTIONS_PATH.exists():
+                try:
+                    _, model_warnings = apply_stored_model_predictions(
+                        base_df,
+                        MODEL_PREDICTIONS_PATH,
+                        output_path,
+                    )
+                    messages.extend(model_warnings)
+                    messages.append("Model loaded. Stored ML predictions were matched to refreshed odds.")
+                    st.session_state.model_source = "historical_model_if_available"
+                    return messages
+                except Exception as exc:
+                    messages.append(f"Stored ML predictions could not be reused. Regenerating ML predictions. Details: {exc}")
             if HISTORICAL_RESULTS_PATH.exists():
                 raw = load_historical_results(HISTORICAL_RESULTS_PATH)
                 standardized = standardize_historical_results(raw)
