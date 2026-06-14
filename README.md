@@ -90,7 +90,7 @@ The app is designed so normal users do not need to train or apply models manuall
 - Bundled model artifacts live in `data/models/model.pkl`, `data/models/model_metadata.json` and `data/models/feature_columns.json`.
 - On startup, the app checks for model artifacts and automatically prepares upcoming-match predictions when possible.
 - The primary UI shows the decision, not the modelling machinery: favorite, probabilities, No bet/Playable/Better elsewhere, bookmaker and stake.
-- A bundled model is production-ready only when metadata proves it was trained on a substantial historical international dataset: at least 1000 training rows, 200 test rows and 10 features.
+- A bundled model is production-ready only when metadata proves it was trained on a substantial historical international dataset: at least 1000 training rows, 200 test rows, 8+ years of data, 10+ features and coverage for qualifiers, World Cup/major tournaments, Elo, recent form and neutral-venue context.
 - Small generated/sample artifacts are marked as demo models. Demo models can be inspected in Advanced / Admin but are not used as `Best available prediction` in official/live mode.
 - If model files are missing or cannot be applied, the app falls back to market probabilities and keeps the normal user flow working.
 - `data/historical/international_results.csv` is developer training input only. It is not required at runtime when pre-trained artifacts are bundled.
@@ -326,7 +326,7 @@ Odds APIs may not include Danske Spil or all World Cup fixtures at all times. Th
 
 Sprint 6 added the first historical international football model. It is intentionally simple: a multinomial logistic regression predicting home win, draw and away win.
 
-Normal users do not need historical data. The deployed app should ship with production-ready pre-trained artifacts in `data/models/`. The current bundled baseline artifact is marked as a demo model because it was trained on too little generated/sample data.
+Normal users do not need historical data. The deployed app should ship with production-ready pre-trained artifacts in `data/models/`. The current bundled baseline artifact is marked as a demo model because it was trained on too little generated/sample data. Model Performance intentionally hides demo/backtest metrics until a real historical dataset has been added and a production model has been exported.
 
 Place historical data here:
 

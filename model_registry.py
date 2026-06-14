@@ -139,6 +139,13 @@ def get_model_readiness(
         "test_rows": validation["test_rows"],
         "feature_count": validation["feature_count"],
         "training_data_source": validation["training_data_source"],
+        "training_year_span": validation["training_year_span"],
+        "includes_elo_features": validation["includes_elo_features"],
+        "includes_form_features": validation["includes_form_features"],
+        "includes_tournament_features": validation["includes_tournament_features"],
+        "includes_neutral_venue": validation["includes_neutral_venue"],
+        "includes_qualifiers": validation["includes_qualifiers"],
+        "includes_world_cup_or_major_tournaments": validation["includes_world_cup_or_major_tournaments"],
         "metadata": metadata,
     }
 

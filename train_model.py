@@ -152,6 +152,9 @@ def train_historical_model(
     FEATURE_COLUMNS_PATH.parent.mkdir(parents=True, exist_ok=True)
     FEATURE_COLUMNS_PATH.write_text(json.dumps(feature_columns, indent=2))
     trained_at = datetime.now(timezone.utc).isoformat()
+    training_start = training_df["date"].min()
+    training_end = training_df["date"].max()
+    training_year_span = (training_end - training_start).days / 365.25 if pd.notna(training_start) and pd.notna(training_end) else 0.0
     metadata = {
         "model_version": trained_at,
         "trained_at_utc": trained_at,
@@ -159,13 +162,31 @@ def train_historical_model(
         "test_rows": int(len(test_df)),
         "feature_count": len(feature_columns),
         "training_data_source": training_data_source,
-        "training_data_start_date": str(training_df["date"].min()),
-        "training_data_end_date": str(training_df["date"].max()),
+        "training_data_start_date": str(training_start),
+        "training_data_end_date": str(training_end),
+        "training_year_span": float(training_year_span),
         "is_demo_model": is_demo_model,
         "includes_elo_features": "elo_diff" in feature_columns,
         "includes_form_features": "home_points_per_match_last5" in feature_columns,
         "includes_tournament_features": "is_world_cup" in feature_columns,
         "includes_neutral_venue": "neutral" in feature_columns,
+        "includes_qualifiers": (
+            "is_qualifier" in feature_columns
+            and "is_qualifier" in training_df.columns
+            and bool(training_df["is_qualifier"].fillna(False).any())
+        ),
+        "includes_world_cup_or_major_tournaments": (
+            (
+                "is_world_cup" in feature_columns
+                and "is_world_cup" in training_df.columns
+                and bool(training_df["is_world_cup"].fillna(False).any())
+            )
+            or (
+                "is_major_tournament" in feature_columns
+                and "is_major_tournament" in training_df.columns
+                and bool(training_df["is_major_tournament"].fillna(False).any())
+            )
+        ),
         "includes_schedule_features": include_draw_context_features,
         "performance_accuracy": metrics.get("accuracy"),
         "performance_log_loss": metrics.get("log_loss"),

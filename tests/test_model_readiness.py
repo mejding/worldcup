@@ -1,6 +1,6 @@
 import json
 
-from model_readiness import validate_model_artifact
+from model_readiness import is_production_performance_available, validate_model_artifact
 from model_registry import get_model_readiness
 
 
@@ -14,11 +14,14 @@ def _metadata(training_rows=1200, test_rows=250, feature_count=15, is_demo_model
         "training_data_source": "historical_international_results",
         "training_data_start_date": "2000-01-01",
         "training_data_end_date": "2025-12-31",
+        "training_year_span": 25.0,
         "is_demo_model": is_demo_model,
         "includes_elo_features": True,
         "includes_form_features": True,
         "includes_tournament_features": True,
         "includes_neutral_venue": True,
+        "includes_qualifiers": True,
+        "includes_world_cup_or_major_tournaments": True,
         "includes_schedule_features": True,
         "performance_accuracy": 0.52,
         "performance_log_loss": 1.02,
@@ -59,6 +62,45 @@ def test_production_model_with_sufficient_rows_is_ready():
     assert result["status"] == "production_ready"
     assert result["is_usable_as_best_available"] is True
     assert result["warnings"] == []
+
+
+def test_model_without_qualifier_and_tournament_coverage_is_not_production_ready():
+    metadata = _metadata()
+    metadata["includes_qualifiers"] = False
+    metadata["includes_world_cup_or_major_tournaments"] = False
+
+    result = validate_model_artifact(metadata)
+
+    assert result["status"] == "demo_model"
+    assert result["is_usable_as_best_available"] is False
+    assert any("qualifiers" in warning for warning in result["warnings"])
+
+
+def test_model_with_short_training_period_is_not_production_ready():
+    metadata = _metadata()
+    metadata["training_data_start_date"] = "2024-01-01"
+    metadata["training_data_end_date"] = "2025-01-01"
+    metadata["training_year_span"] = 1.0
+
+    result = validate_model_artifact(metadata)
+
+    assert result["status"] == "demo_model"
+    assert result["is_usable_as_best_available"] is False
+    assert any("period is too short" in warning for warning in result["warnings"])
+
+
+def test_demo_backtest_is_not_reliable_production_performance():
+    readiness = validate_model_artifact(_metadata(training_rows=36, test_rows=9))
+    backtest_status = {"backtest_exists": True, "prediction_count": 500}
+
+    assert is_production_performance_available(readiness, backtest_status) is False
+
+
+def test_production_backtest_is_reliable_performance():
+    readiness = validate_model_artifact(_metadata())
+    backtest_status = {"backtest_exists": True, "prediction_count": 500}
+
+    assert is_production_performance_available(readiness, backtest_status) is True
 
 
 def test_missing_metadata_is_invalid():

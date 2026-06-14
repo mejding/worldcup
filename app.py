@@ -116,6 +116,7 @@ from historical_data import load_historical_results, standardize_historical_resu
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import refresh_live_odds_and_predictions
 from match_results import add_match_results, split_active_and_archived_matches
+from model_readiness import is_production_performance_available
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status, get_model_readiness
 from odds_provider import get_odds_source_status
 from odds_utils import calculate_edge
@@ -1798,7 +1799,7 @@ def page_model_performance() -> None:
     )
 
     st.subheader("Performance")
-    if backtest_status["backtest_exists"] and backtest_status["prediction_count"] > 0:
+    if is_production_performance_available(readiness, backtest_status):
         metric_row(
             [
                 ("Accuracy", "-" if pd.isna(backtest_status["overall_accuracy"]) else format_percentage(backtest_status["overall_accuracy"])),
@@ -1821,16 +1822,34 @@ def page_model_performance() -> None:
         )
         st.caption("Showing bundled model holdout metrics. Full backtest results have not been calculated yet.")
     elif readiness["status"] == "demo_model":
+        metadata = readiness.get("metadata", {})
         metric_row(
             [
                 ("Training rows", str(readiness["training_rows"])),
                 ("Test rows", str(readiness["test_rows"])),
+                ("Years covered", f"{readiness.get('training_year_span', 0):.1f}"),
                 ("Feature count", str(readiness["feature_count"])),
-                ("Model status", "Demo/sample model"),
+                ("Model status", "Not production-ready"),
             ]
         )
-        st.warning("Performance metrics are not reliable because the model was trained on too little data.")
-        st.caption("Developer/admin action: train and export a production model using a full historical international match dataset.")
+        st.warning(
+            "Performance metrics are hidden because the current model is a demo artifact, not a production model "
+            "trained on previous tournaments, qualifiers, Elo/form and tournament context."
+        )
+        missing_rows = [
+            ("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing"),
+            ("Production training rows", f"{readiness['training_rows']} / 1000+"),
+            ("Production test rows", f"{readiness['test_rows']} / 200+"),
+            ("Training years", f"{readiness.get('training_year_span', 0):.1f} / 8+"),
+            ("Qualifiers in training data", "Yes" if readiness.get("includes_qualifiers") else "Missing"),
+            ("World Cup/major tournaments", "Yes" if readiness.get("includes_world_cup_or_major_tournaments") else "Missing"),
+            ("Elo features", "Yes" if readiness.get("includes_elo_features") else "Missing"),
+            ("Recent form features", "Yes" if readiness.get("includes_form_features") else "Missing"),
+            ("Neutral venue context", "Yes" if readiness.get("includes_neutral_venue") else "Missing"),
+            ("Training source", str(metadata.get("training_data_source") or readiness.get("training_data_source") or "-")),
+        ]
+        st.dataframe(pd.DataFrame(missing_rows, columns=["Requirement", "Status"]), width="stretch", hide_index=True)
+        st.caption("Developer/admin action: add a real historical international dataset and retrain/export the model.")
     else:
         empty_state("Model performance has not been calculated yet.")
         st.caption("Performance is calculated on historical matches where the result is known.")
@@ -2556,7 +2575,13 @@ def page_settings() -> None:
         ("Training rows", str(readiness["training_rows"])),
         ("Test rows", str(readiness["test_rows"])),
         ("Feature count", str(readiness["feature_count"])),
+        ("Training years", f"{readiness.get('training_year_span', 0):.1f}"),
         ("Training data source", str(readiness["training_data_source"] or "-")),
+        ("Qualifiers", "Yes" if readiness.get("includes_qualifiers") else "Missing"),
+        ("World Cup/major tournaments", "Yes" if readiness.get("includes_world_cup_or_major_tournaments") else "Missing"),
+        ("Elo features", "Yes" if readiness.get("includes_elo_features") else "Missing"),
+        ("Form features", "Yes" if readiness.get("includes_form_features") else "Missing"),
+        ("Neutral venue", "Yes" if readiness.get("includes_neutral_venue") else "Missing"),
         ("Production-ready", "Yes" if readiness["is_usable_as_best_available"] else "No"),
         ("Demo model", "Yes" if readiness["status"] == "demo_model" else "No"),
         ("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing"),
