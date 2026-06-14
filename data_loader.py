@@ -282,6 +282,7 @@ def _use_market_as_model(df: pd.DataFrame) -> pd.DataFrame:
     result["model_home_prob"] = result["market_home_prob"]
     result["model_draw_prob"] = result["market_draw_prob"]
     result["model_away_prob"] = result["market_away_prob"]
+    result["model_probability_source"] = "market_fallback"
     return result
 
 

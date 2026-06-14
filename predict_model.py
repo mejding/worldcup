@@ -32,7 +32,8 @@ def prediction_file_uses_market_as_model(path: Union[str, Path]) -> bool:
     comparable = model.notna().all(axis=1) & market.notna().all(axis=1)
     if not comparable.any():
         return False
-    return model[comparable].round(8).to_numpy().tolist() == market[comparable].round(8).to_numpy().tolist()
+    equal_rows = (model[comparable].round(8).to_numpy() == market[comparable].round(8).to_numpy()).all(axis=1)
+    return bool(equal_rows.mean() >= 0.8)
 
 
 def predict_upcoming_matches(
@@ -67,6 +68,7 @@ def predict_upcoming_matches(
     result["model_home_prob"] = probabilities[:, class_index["H"]]
     result["model_draw_prob"] = probabilities[:, class_index["D"]]
     result["model_away_prob"] = probabilities[:, class_index["A"]]
+    result["model_probability_source"] = "historical_model"
     totals = result[["model_home_prob", "model_draw_prob", "model_away_prob"]].sum(axis=1)
     result["model_home_prob"] = result["model_home_prob"] / totals
     result["model_draw_prob"] = result["model_draw_prob"] / totals

@@ -475,6 +475,29 @@ def format_probability_for_row(row, column: str) -> str:
     return format_probability(row.get(column))
 
 
+def row_has_distinct_ml_model(row) -> bool:
+    source = str(row.get("model_probability_source", "") or "").lower()
+    if source == "historical_model":
+        return True
+    if source == "market_fallback":
+        return False
+    model_values = [
+        pd.to_numeric(row.get("model_home_prob"), errors="coerce"),
+        pd.to_numeric(row.get("model_draw_prob"), errors="coerce"),
+        pd.to_numeric(row.get("model_away_prob"), errors="coerce"),
+    ]
+    market_values = [
+        pd.to_numeric(row.get("market_home_prob"), errors="coerce"),
+        pd.to_numeric(row.get("market_draw_prob"), errors="coerce"),
+        pd.to_numeric(row.get("market_away_prob"), errors="coerce"),
+    ]
+    if any(pd.isna(value) for value in model_values):
+        return False
+    if any(pd.isna(value) for value in market_values):
+        return not _probability_triplet_is_uniform(row, "model")
+    return any(abs(float(model) - float(market)) >= 0.0001 for model, market in zip(model_values, market_values))
+
+
 def probability_source_label(row) -> str:
     if not row_has_displayable_probabilities(row):
         return "Afventer odds/model"
@@ -512,6 +535,8 @@ def match_prediction_summary(row) -> dict:
 
 
 def probability_line_for_source(row, prefix: str) -> str:
+    if prefix == "model" and not row_has_distinct_ml_model(row):
+        return "Afventer ML model"
     if prefix == "market" and not row_has_priced_odds(row):
         return "Afventer odds"
     if prefix in {"market", "model"} and _probability_triplet_is_uniform(row, prefix) and not row_has_priced_odds(row):

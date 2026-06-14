@@ -167,6 +167,7 @@ def _blank_prediction_row(fixture_row) -> dict:
         "model_home_prob": 1 / 3,
         "model_draw_prob": 1 / 3,
         "model_away_prob": 1 / 3,
+        "model_probability_source": "market_fallback",
         "market_home_prob": 1 / 3,
         "market_draw_prob": 1 / 3,
         "market_away_prob": 1 / 3,

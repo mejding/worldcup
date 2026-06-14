@@ -95,6 +95,22 @@ def test_prediction_file_uses_market_as_model_detects_fallback(tmp_path):
     assert prediction_file_uses_market_as_model(path) is True
 
 
+def test_prediction_file_uses_market_as_model_detects_mostly_fallback(tmp_path):
+    path = tmp_path / "predictions.csv"
+    rows = []
+    for index in range(10):
+        row = _upcoming().iloc[0].to_dict()
+        row["match_id"] = f"M{index}"
+        if index < 9:
+            row["model_home_prob"] = row["market_home_prob"]
+            row["model_draw_prob"] = row["market_draw_prob"]
+            row["model_away_prob"] = row["market_away_prob"]
+        rows.append(row)
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    assert prediction_file_uses_market_as_model(path) is True
+
+
 def test_prediction_file_uses_market_as_model_allows_distinct_model(tmp_path):
     path = tmp_path / "predictions.csv"
     _upcoming().to_csv(path, index=False)
