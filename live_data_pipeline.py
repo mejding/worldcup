@@ -7,6 +7,7 @@ import pandas as pd
 
 from config import (
     LIVE_PREDICTIONS_PATH,
+    MANUAL_ODDS_PATH,
     ODDS_API_DATE_FORMAT,
     ODDS_API_MARKETS,
     ODDS_API_ODDS_FORMAT,
@@ -132,6 +133,25 @@ def _snapshot_is_stale(path: Union[str, Path] = RAW_ODDS_SNAPSHOT_PATH, refresh_
         return True
     age_minutes = (pd.Timestamp.utcnow() - timestamps.max()).total_seconds() / 60
     return age_minutes >= refresh_minutes
+
+
+def live_odds_refresh_needed(force_refresh: bool = False) -> bool:
+    if force_refresh:
+        return True
+    status = get_odds_source_status()
+    has_source = status.get("has_api_key") or status.get("manual_odds_valid") or status.get("cached_odds_exists")
+    if not has_source:
+        return False
+    if not Path(LIVE_PREDICTIONS_PATH).exists() or Path(LIVE_PREDICTIONS_PATH).stat().st_size == 0:
+        return True
+    if status.get("has_api_key") and _snapshot_is_stale():
+        return True
+    live_mtime = Path(LIVE_PREDICTIONS_PATH).stat().st_mtime
+    for source_path in [MANUAL_ODDS_PATH, RAW_ODDS_SNAPSHOT_PATH]:
+        path = Path(source_path)
+        if path.exists() and path.stat().st_mtime > live_mtime:
+            return True
+    return False
 
 
 def _blank_prediction_row(fixture_row) -> dict:

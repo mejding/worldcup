@@ -114,7 +114,7 @@ from fixture_data import fixture_provenance, load_fixture_dataset, validate_fixt
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
-from live_data_pipeline import refresh_live_odds_and_predictions
+from live_data_pipeline import live_odds_refresh_needed, refresh_live_odds_and_predictions
 from match_results import add_match_results, split_active_and_archived_matches
 from model_readiness import is_production_performance_available
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status, get_model_readiness
@@ -256,8 +256,41 @@ def prepare_best_available_predictions() -> list[str]:
     return messages
 
 
+def auto_refresh_live_odds_on_reload() -> list[str]:
+    if st.session_state.data_mode == "sample":
+        return []
+    status = get_odds_source_status()
+    has_refresh_source = (
+        status.get("has_api_key")
+        or status.get("manual_odds_valid")
+        or status.get("cached_odds_exists")
+    )
+    if not has_refresh_source:
+        return []
+    if not live_odds_refresh_needed(force_refresh=False):
+        if st.session_state.data_mode == "official" and LIVE_PREDICTIONS_PATH.exists():
+            st.session_state.data_mode = "live"
+        return []
+
+    try:
+        result = refresh_live_odds_and_predictions(force_refresh=False)
+    except Exception as exc:
+        return [f"Automatic odds refresh failed. Using last available data. Details: {exc}"]
+
+    if result.get("matches_with_odds", 0) > 0:
+        st.session_state.data_mode = "live"
+        return [
+            "Odds refreshed automatically. "
+            f"{result['matches_with_odds']} / {result['matches_total']} matches have odds."
+        ]
+    if result.get("warnings"):
+        return ["Automatic odds refresh ran, but no match odds were available."]
+    return []
+
+
 def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
-    startup_messages = prepare_best_available_predictions()
+    startup_messages = auto_refresh_live_odds_on_reload()
+    startup_messages.extend(prepare_best_available_predictions())
     try:
         predictions, mode_warnings, actual_mode = load_predictions_by_mode(
             st.session_state.data_mode,
@@ -469,6 +502,37 @@ def match_prediction_summary(row) -> dict:
             f"{row['away_team']} {format_probability(probabilities[row['away_team']])}"
         ),
     }
+
+
+def probability_line_for_source(row, prefix: str) -> str:
+    if prefix == "market" and not row_has_priced_odds(row):
+        return "Afventer odds"
+    if prefix in {"market", "model"} and _probability_triplet_is_uniform(row, prefix) and not row_has_priced_odds(row):
+        return "Afventer data"
+    values = [
+        pd.to_numeric(row.get(f"{prefix}_home_prob"), errors="coerce"),
+        pd.to_numeric(row.get(f"{prefix}_draw_prob"), errors="coerce"),
+        pd.to_numeric(row.get(f"{prefix}_away_prob"), errors="coerce"),
+    ]
+    if any(pd.isna(value) for value in values):
+        return "Afventer data"
+    return (
+        f"{row['home_team']} {format_probability(values[0])} · "
+        f"Draw {format_probability(values[1])} · "
+        f"{row['away_team']} {format_probability(values[2])}"
+    )
+
+
+def favorite_for_source(row, prefix: str) -> str:
+    line = probability_line_for_source(row, prefix)
+    if line.startswith("Afventer"):
+        return line
+    probabilities = {
+        row["home_team"]: float(row.get(f"{prefix}_home_prob")),
+        "Draw": float(row.get(f"{prefix}_draw_prob")),
+        row["away_team"]: float(row.get(f"{prefix}_away_prob")),
+    }
+    return max(probabilities, key=probabilities.get)
 
 
 def betting_decision_summary(row) -> str:
@@ -769,6 +833,9 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
             "model_home_prob": "Model H",
             "model_draw_prob": "Model U",
             "model_away_prob": "Model A",
+            "market_home_prob": "Market H",
+            "market_draw_prob": "Market U",
+            "market_away_prob": "Market A",
             "active_home_prob": "Active H",
             "active_draw_prob": "Active U",
             "active_away_prob": "Active A",
@@ -793,6 +860,9 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
         "Model H": "model_home_prob",
         "Model U": "model_draw_prob",
         "Model A": "model_away_prob",
+        "Market H": "market_home_prob",
+        "Market U": "market_draw_prob",
+        "Market A": "market_away_prob",
     }
     for display_column, source_column in probability_display_columns.items():
         if display_column in display_df.columns:
@@ -812,6 +882,12 @@ def format_overview_table(df: pd.DataFrame) -> pd.DataFrame:
         "Active H",
         "Active U",
         "Active A",
+        "Model H",
+        "Model U",
+        "Model A",
+        "Market H",
+        "Market U",
+        "Market A",
         "DS",
         "Best market",
         "Status",
@@ -1001,6 +1077,8 @@ def odds_provenance_text(df: pd.DataFrame) -> str:
 
 def compact_match_card(row) -> None:
     prediction = match_prediction_summary(row)
+    model_line = probability_line_for_source(row, "model")
+    market_line = probability_line_for_source(row, "market")
     status = html.escape(str(row["recommendation_status"]))
     status_class = {
         "Playable at Danske Spil": "wc-status-green",
@@ -1021,7 +1099,8 @@ def compact_match_card(row) -> None:
             <div class="{status_class} wc-match-status">{status}</div>
           </div>
           <div class="wc-match-line"><b>Favorite:</b> {html.escape(prediction['favorite'])}</div>
-          <div class="wc-match-line"><b>Prediction:</b> {html.escape(prediction['line'])}</div>
+          <div class="wc-match-line"><b>ML model:</b> {html.escape(model_line)}</div>
+          <div class="wc-match-line"><b>Market odds:</b> {html.escape(market_line)}</div>
           <div class="wc-match-line"><b>Betting decision:</b> {html.escape(betting_decision_summary(row))} · <b>Danske Spil:</b> {html.escape(recommendation_summary(row, 'ds'))} · <b>Best market:</b> {html.escape(recommendation_summary(row, 'best'))}</div>
           <div class="wc-match-reason">{html.escape(reason)}</div>
         </div>
@@ -1309,6 +1388,20 @@ def page_match_detail(df: pd.DataFrame) -> None:
     with h3:
         metric_card("Betting decision", row["recommendation_status"], betting_decision_summary(row))
     st.caption("Prediction source: Best available")
+
+    source_cols = st.columns(2)
+    with source_cols[0]:
+        metric_card(
+            "ML model prediction",
+            favorite_for_source(row, "model"),
+            probability_line_for_source(row, "model"),
+        )
+    with source_cols[1]:
+        metric_card(
+            "Market-implied prediction",
+            favorite_for_source(row, "market"),
+            probability_line_for_source(row, "market"),
+        )
 
     has_displayable_probabilities = row_has_displayable_probabilities(row)
     if has_displayable_probabilities:

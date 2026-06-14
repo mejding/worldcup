@@ -3,7 +3,7 @@ import pytest
 
 from config import REQUIRED_PREDICTION_COLUMNS
 from fetch_odds import normalize_odds_response
-from live_data_pipeline import build_live_predictions
+from live_data_pipeline import build_live_predictions, live_odds_refresh_needed
 
 
 def _odds_df(include_ds=True, include_draw=True):
@@ -98,6 +98,28 @@ def test_placeholder_draw_context_fields_are_present(tmp_path):
     assert row["draw_context_score"] == 50
     assert row["draw_context_label"] == "Medium"
     assert row["one_team_must_win"] == False
+
+
+def test_live_odds_refresh_not_needed_without_source(monkeypatch, tmp_path):
+    live_path = tmp_path / "live.csv"
+    live_path.write_text("x\n")
+    monkeypatch.setattr("live_data_pipeline.LIVE_PREDICTIONS_PATH", live_path)
+    monkeypatch.setattr(
+        "live_data_pipeline.get_odds_source_status",
+        lambda: {"has_api_key": False, "manual_odds_valid": False, "cached_odds_exists": False},
+    )
+
+    assert live_odds_refresh_needed() is False
+
+
+def test_live_odds_refresh_needed_when_live_predictions_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr("live_data_pipeline.LIVE_PREDICTIONS_PATH", tmp_path / "missing.csv")
+    monkeypatch.setattr(
+        "live_data_pipeline.get_odds_source_status",
+        lambda: {"has_api_key": False, "manual_odds_valid": True, "cached_odds_exists": False},
+    )
+
+    assert live_odds_refresh_needed() is True
 
 
 def test_odds_events_match_official_fixtures_by_teams_and_date(tmp_path):
