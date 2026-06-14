@@ -201,6 +201,32 @@ def _empty_historical_results() -> pd.DataFrame:
     )
 
 
+def rebuild_model_from_historical_data(include_draw_context_features: bool = False) -> str:
+    if not HISTORICAL_RESULTS_PATH.exists():
+        raise FileNotFoundError("Historical training data is missing.")
+    raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+    hist_warnings, hist_errors = validate_historical_results(raw)
+    if hist_errors:
+        raise ValueError("; ".join(hist_errors))
+    standardized = standardize_historical_results(raw)
+    training_df = build_training_dataset(
+        standardized,
+        include_draw_context_features=include_draw_context_features,
+    )
+    metadata = train_historical_model(
+        training_df,
+        include_draw_context_features=include_draw_context_features,
+        allow_demo_model=False,
+        training_data_source="historical_international_results",
+    )
+    warning_text = f" Warnings: {'; '.join(hist_warnings)}" if hist_warnings else ""
+    return (
+        "Runtime model rebuilt from historical data. "
+        f"Training rows: {metadata['training_rows']}; test rows: {metadata['test_rows']}."
+        f"{warning_text}"
+    )
+
+
 def prepare_best_available_predictions() -> list[str]:
     messages = []
     model_status = get_active_model_status()
@@ -210,9 +236,20 @@ def prepare_best_available_predictions() -> list[str]:
         messages.append(readiness["normal_user_message"])
         return messages
     if not model_status["artifacts_ready"]:
-        st.session_state.model_source = "market_only"
-        messages.append("Predictions are currently based on market odds because the pre-trained model is unavailable.")
-        return messages
+        try:
+            messages.append(
+                rebuild_model_from_historical_data(
+                    include_draw_context_features=bool(model_status.get("include_draw_context_features", False))
+                )
+            )
+            model_status = get_active_model_status()
+        except Exception as exc:
+            st.session_state.model_source = "market_only"
+            messages.append(
+                "Predictions are currently based on market odds because the pre-trained model is unavailable "
+                f"and could not be rebuilt from historical data. Details: {exc}"
+            )
+            return messages
 
     try:
         base_df, base_warnings, actual_mode = load_predictions_by_mode(
@@ -246,12 +283,25 @@ def prepare_best_available_predictions() -> list[str]:
                 standardized = standardize_historical_results(raw)
             else:
                 standardized = _empty_historical_results()
-            _, model_warnings = predict_upcoming_matches(
-                base_df,
-                standardized,
-                output_path=output_path,
-                include_draw_context_features=bool(model_status.get("include_draw_context_features", False)),
-            )
+            try:
+                _, model_warnings = predict_upcoming_matches(
+                    base_df,
+                    standardized,
+                    output_path=output_path,
+                    include_draw_context_features=bool(model_status.get("include_draw_context_features", False)),
+                )
+            except Exception:
+                messages.append(
+                    rebuild_model_from_historical_data(
+                        include_draw_context_features=bool(model_status.get("include_draw_context_features", False))
+                    )
+                )
+                _, model_warnings = predict_upcoming_matches(
+                    base_df,
+                    standardized,
+                    output_path=output_path,
+                    include_draw_context_features=bool(model_status.get("include_draw_context_features", False)),
+                )
             messages.extend(model_warnings)
             messages.append("Model loaded. Predictions are being generated for upcoming matches.")
         else:
