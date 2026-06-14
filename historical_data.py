@@ -54,6 +54,25 @@ def standardize_historical_results(df: pd.DataFrame) -> pd.DataFrame:
     return result[STANDARD_COLUMNS]
 
 
+def clean_historical_results_for_training(df: pd.DataFrame, as_of=None) -> pd.DataFrame:
+    result = df.copy()
+    result["date"] = pd.to_datetime(result["date"], errors="coerce", utc=True)
+    result["home_score"] = pd.to_numeric(result["home_score"], errors="coerce")
+    result["away_score"] = pd.to_numeric(result["away_score"], errors="coerce")
+    as_of_ts = pd.Timestamp(as_of, tz="UTC") if as_of is not None else pd.Timestamp.utcnow()
+    result = result[
+        result["date"].notna()
+        & result["home_score"].notna()
+        & result["away_score"].notna()
+        & (result["date"] <= as_of_ts)
+    ].copy()
+    result["date"] = result["date"].dt.strftime("%Y-%m-%d")
+    result["home_score"] = result["home_score"].astype(int)
+    result["away_score"] = result["away_score"].astype(int)
+    result = standardize_historical_results(result)
+    return result.drop_duplicates().reset_index(drop=True)
+
+
 def _match_result(row) -> str:
     if pd.isna(row["home_score"]) or pd.isna(row["away_score"]):
         return pd.NA

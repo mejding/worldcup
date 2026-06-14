@@ -334,6 +334,14 @@ Place historical data here:
 data/historical/international_results.csv
 ```
 
+The bundled production artifact is trained from a cleaned public international-results dataset:
+
+```text
+https://github.com/martj42/international_results
+```
+
+The import step removes future fixtures, rows without final scores and duplicate rows before training.
+
 Required columns:
 
 - `date`
@@ -353,7 +361,7 @@ Current features include tournament flags, team historical win/draw/loss rates, 
 
 Developer training workflow:
 
-1. Add historical training data at `data/historical/international_results.csv`.
+1. Add or refresh historical training data at `data/historical/international_results.csv`.
 2. Run the export script.
 3. Commit or deploy the generated artifacts in `data/models/`.
 4. Open the app. It loads pre-trained artifacts automatically.
@@ -369,6 +377,7 @@ Production training expectations:
 Command-line training is also available:
 
 ```bash
+python scripts/import_historical_results.py
 python scripts/train_and_export_model.py --input data/historical/international_results.csv
 ```
 

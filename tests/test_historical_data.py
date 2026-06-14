@@ -1,6 +1,6 @@
 import pandas as pd
 
-from historical_data import standardize_historical_results, validate_historical_results
+from historical_data import clean_historical_results_for_training, standardize_historical_results, validate_historical_results
 
 
 def test_standardizes_valid_historical_data():
@@ -49,3 +49,18 @@ def test_handles_missing_tournament_and_neutral():
     assert result.iloc[0]["tournament"] == "Unknown"
     assert result.iloc[0]["neutral"] == False
 
+
+def test_clean_historical_results_filters_future_and_missing_scores():
+    df = pd.DataFrame(
+        [
+            {"date": "2020-01-01", "home_team": "A", "away_team": "B", "home_score": 2, "away_score": 1, "tournament": "Friendly", "neutral": False},
+            {"date": "2030-01-01", "home_team": "A", "away_team": "C", "home_score": 1, "away_score": 0, "tournament": "Friendly", "neutral": False},
+            {"date": "2020-01-02", "home_team": "A", "away_team": "D", "home_score": None, "away_score": None, "tournament": "Friendly", "neutral": False},
+        ]
+    )
+
+    result = clean_historical_results_for_training(df, as_of="2026-01-01")
+
+    assert len(result) == 1
+    assert result.iloc[0]["home_team"] == "A"
+    assert result.iloc[0]["result"] == "H"
