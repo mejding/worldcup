@@ -126,7 +126,7 @@ from probability_sources import (
     load_active_probability_source,
     save_active_probability_source,
 )
-from predict_model import predict_upcoming_matches
+from predict_model import predict_upcoming_matches, prediction_file_uses_market_as_model
 from recommendations import add_recommendations
 from time_utils import add_danish_kickoff_column, format_danish_kickoff
 from tooltip_definitions import TOOLTIPS
@@ -233,6 +233,13 @@ def prepare_best_available_predictions() -> list[str]:
                 source_path.stat().st_mtime if source_path.exists() else 0,
                 MODEL_PATH.stat().st_mtime,
             )
+        if (
+            not should_generate
+            and readiness["is_usable_as_best_available"]
+            and prediction_file_uses_market_as_model(output_path)
+        ):
+            should_generate = True
+            messages.append("Existing model prediction file used market probabilities as fallback. Regenerating ML predictions.")
         if should_generate:
             if HISTORICAL_RESULTS_PATH.exists():
                 raw = load_historical_results(HISTORICAL_RESULTS_PATH)

@@ -3,7 +3,7 @@ import pytest
 
 from features import build_training_dataset
 from historical_data import standardize_historical_results
-from predict_model import predict_upcoming_matches
+from predict_model import predict_upcoming_matches, prediction_file_uses_market_as_model
 from train_model import train_historical_model
 
 
@@ -83,3 +83,20 @@ def test_missing_model_falls_back_gracefully(tmp_path):
     assert warnings
     assert result.iloc[0]["model_home_prob"] == pytest.approx(result.iloc[0]["market_home_prob"])
 
+
+def test_prediction_file_uses_market_as_model_detects_fallback(tmp_path):
+    path = tmp_path / "predictions.csv"
+    _upcoming().assign(
+        model_home_prob=0.45,
+        model_draw_prob=0.25,
+        model_away_prob=0.30,
+    ).to_csv(path, index=False)
+
+    assert prediction_file_uses_market_as_model(path) is True
+
+
+def test_prediction_file_uses_market_as_model_allows_distinct_model(tmp_path):
+    path = tmp_path / "predictions.csv"
+    _upcoming().to_csv(path, index=False)
+
+    assert prediction_file_uses_market_as_model(path) is False

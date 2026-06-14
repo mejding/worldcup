@@ -15,6 +15,26 @@ def load_trained_model(model_path: Union[str, Path] = MODEL_PATH):
     return joblib.load(model_path)
 
 
+def prediction_file_uses_market_as_model(path: Union[str, Path]) -> bool:
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return False
+    model_columns = ["model_home_prob", "model_draw_prob", "model_away_prob"]
+    market_columns = ["market_home_prob", "market_draw_prob", "market_away_prob"]
+    if df.empty or not set(model_columns + market_columns).issubset(df.columns):
+        return False
+    model = df[model_columns].apply(pd.to_numeric, errors="coerce")
+    market = df[market_columns].apply(pd.to_numeric, errors="coerce")
+    comparable = model.notna().all(axis=1) & market.notna().all(axis=1)
+    if not comparable.any():
+        return False
+    return model[comparable].round(8).to_numpy().tolist() == market[comparable].round(8).to_numpy().tolist()
+
+
 def predict_upcoming_matches(
     upcoming_df: pd.DataFrame,
     historical_df: pd.DataFrame,
