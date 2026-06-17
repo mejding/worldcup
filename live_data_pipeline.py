@@ -235,11 +235,11 @@ def _predictions_from_match_odds_table(match_odds_df: pd.DataFrame) -> pd.DataFr
     return result
 
 
-def _select_odds_source(force_refresh: bool = False) -> tuple[pd.DataFrame, dict, list[str]]:
+def _select_odds_source(force_refresh: bool = False, allow_api_fetch: bool = True) -> tuple[pd.DataFrame, dict, list[str]]:
     warnings = []
     metadata = {}
     api_key = get_odds_api_key()
-    if api_key and (force_refresh or _snapshot_is_stale()):
+    if api_key and allow_api_fetch and (force_refresh or _snapshot_is_stale()):
         response_json, metadata = fetch_odds_from_the_odds_api(
             sport_key=ODDS_API_SPORT_KEY,
             regions=ODDS_API_REGIONS,
@@ -279,10 +279,13 @@ def _select_odds_source(force_refresh: bool = False) -> tuple[pd.DataFrame, dict
     return pd.DataFrame(), {"active_odds_source": "missing", "source_status": "missing"}, warnings
 
 
-def refresh_live_odds_and_predictions(force_refresh: bool = False) -> dict:
+def refresh_live_odds_and_predictions(force_refresh: bool = False, allow_api_fetch: bool = True) -> dict:
     fixtures_df = load_fixture_dataset()
     status = get_odds_source_status()
-    odds_df, metadata, warnings = _select_odds_source(force_refresh=force_refresh)
+    odds_df, metadata, warnings = _select_odds_source(
+        force_refresh=force_refresh,
+        allow_api_fetch=allow_api_fetch,
+    )
     mapped_df, mapping_warnings = map_odds_to_fixtures(fixtures_df, odds_df)
     warnings.extend(mapping_warnings)
     match_odds_df = build_match_odds_table(mapped_df)

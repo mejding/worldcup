@@ -330,6 +330,12 @@ def auto_refresh_live_odds_on_reload() -> list[str]:
     if st.session_state.data_mode == "sample":
         return []
     status = get_odds_source_status()
+    auto_api_refresh = str(get_secret_or_env("AUTO_REFRESH_API_ODDS_ON_RELOAD", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
     has_refresh_source = (
         status.get("has_api_key")
         or status.get("manual_odds_valid")
@@ -341,9 +347,16 @@ def auto_refresh_live_odds_on_reload() -> list[str]:
         if st.session_state.data_mode == "official" and LIVE_PREDICTIONS_PATH.exists():
             st.session_state.data_mode = "live"
         return []
+    if status.get("has_api_key") and not auto_api_refresh and not status.get("manual_odds_valid"):
+        if st.session_state.data_mode == "official" and LIVE_PREDICTIONS_PATH.exists():
+            st.session_state.data_mode = "live"
+        return []
 
     try:
-        result = refresh_live_odds_and_predictions(force_refresh=False)
+        result = refresh_live_odds_and_predictions(
+            force_refresh=False,
+            allow_api_fetch=auto_api_refresh,
+        )
     except Exception as exc:
         return [f"Automatic odds refresh failed. Using last available data. Details: {exc}"]
 

@@ -3,7 +3,7 @@ import pytest
 
 from config import REQUIRED_PREDICTION_COLUMNS
 from fetch_odds import normalize_odds_response
-from live_data_pipeline import build_live_predictions, live_odds_refresh_needed
+from live_data_pipeline import build_live_predictions, live_odds_refresh_needed, refresh_live_odds_and_predictions
 
 
 def _odds_df(include_ds=True, include_draw=True):
@@ -120,6 +120,49 @@ def test_live_odds_refresh_needed_when_live_predictions_missing(monkeypatch, tmp
     )
 
     assert live_odds_refresh_needed() is True
+
+
+def test_refresh_can_skip_api_fetch_when_only_api_key_exists(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "live_data_pipeline.load_fixture_dataset",
+        lambda: pd.DataFrame(
+            [
+                {
+                    "match_id": "WC2026-GRA-001",
+                    "kickoff_utc": "2026-06-11T19:00:00Z",
+                    "group": "A",
+                    "stage": "Group stage",
+                    "matchday": 1,
+                    "home_team": "Mexico",
+                    "away_team": "South Africa",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "live_data_pipeline.get_odds_source_status",
+        lambda: {
+            "has_api_key": True,
+            "manual_odds_valid": False,
+            "cached_odds_exists": False,
+            "active_odds_source": "api",
+        },
+    )
+    monkeypatch.setattr("live_data_pipeline.get_odds_api_key", lambda: "key")
+    monkeypatch.setattr("live_data_pipeline.load_manual_odds_wide", lambda: (pd.DataFrame(), []))
+    monkeypatch.setattr("live_data_pipeline.load_latest_odds_snapshot", lambda *args, **kwargs: pd.DataFrame())
+    monkeypatch.setattr("live_data_pipeline.PROCESSED_ODDS_PATH", tmp_path / "latest_odds.csv")
+    monkeypatch.setattr("live_data_pipeline.LIVE_PREDICTIONS_PATH", tmp_path / "live_predictions.csv")
+
+    def fail_api_fetch(*args, **kwargs):
+        raise AssertionError("API fetch should not run during non-API startup refresh.")
+
+    monkeypatch.setattr("live_data_pipeline.fetch_odds_from_the_odds_api", fail_api_fetch)
+
+    result = refresh_live_odds_and_predictions(force_refresh=False, allow_api_fetch=False)
+
+    assert result["status"] == "missing_odds"
+    assert result["matches_total"] == 1
 
 
 def test_odds_events_match_official_fixtures_by_teams_and_date(tmp_path):
