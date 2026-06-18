@@ -4,6 +4,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+import config as app_config
 from backtest import compare_baseline_vs_draw_context_model, run_walk_forward_backtest, run_world_cup_backtest
 from bankroll import load_bankroll_history, load_bankroll_state, reset_bankroll, update_bankroll
 from bet_log import add_bet, calculate_bet_summary, load_bet_log, reset_bet_settlement, settle_bet
@@ -71,37 +72,43 @@ from backtest_paths import (
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
 )
-from config import (
-    DATA_MODE,
-    DEFAULT_ENSEMBLE_W_MARKET,
-    DEFAULT_PROFILE_NAME,
-    DEFAULT_PROBABILITY_SOURCE,
-    FIFA_FEATURE_COVERAGE_PATH,
-    FIFA_RANKINGS_PATH,
-    FIFA_RANKING_FEATURE_REPORT_PATH,
-    HISTORICAL_RESULTS_PATH,
-    LIVE_PREDICTIONS_PATH,
-    LIVE_PREDICTIONS_WITH_MODEL_PATH,
-    MANUAL_ODDS_PATH,
-    MODEL_PATH,
-    MODEL_VARIANT_COMPARISON_PATH,
-    MODEL_PREDICTIONS_PATH,
-    MODEL_SOURCE,
-    ODDS_API_MARKETS,
-    ODDS_API_REGIONS,
-    ODDS_API_SPORT_KEY,
-    ODDS_SNAPSHOT_PATH,
-    PREFERRED_BOOKMAKER,
-    PREFERRED_BOOKMAKER_NAMES,
-    PROCESSED_ODDS_PATH,
-    REFERENCE_FIXTURES_PATH,
-    SAMPLE_PREDICTIONS_PATH,
-    STAKING_PROFILES,
-    TRAINING_DATASET_PATH,
-    get_staking_profile,
-    get_secret_or_env,
-    validate_staking_profile,
+DATA_MODE = app_config.DATA_MODE
+DEFAULT_ENSEMBLE_W_MARKET = app_config.DEFAULT_ENSEMBLE_W_MARKET
+DEFAULT_PROFILE_NAME = app_config.DEFAULT_PROFILE_NAME
+DEFAULT_PROBABILITY_SOURCE = app_config.DEFAULT_PROBABILITY_SOURCE
+FIFA_RANKINGS_PATH = app_config.FIFA_RANKINGS_PATH
+FIFA_FEATURE_COVERAGE_PATH = getattr(
+    app_config,
+    "FIFA_FEATURE_COVERAGE_PATH",
+    app_config.PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
 )
+FIFA_RANKING_FEATURE_REPORT_PATH = getattr(
+    app_config,
+    "FIFA_RANKING_FEATURE_REPORT_PATH",
+    app_config.REPORTS_DIR / "fifa_ranking_feature_report.md",
+)
+HISTORICAL_RESULTS_PATH = app_config.HISTORICAL_RESULTS_PATH
+LIVE_PREDICTIONS_PATH = app_config.LIVE_PREDICTIONS_PATH
+LIVE_PREDICTIONS_WITH_MODEL_PATH = app_config.LIVE_PREDICTIONS_WITH_MODEL_PATH
+MANUAL_ODDS_PATH = app_config.MANUAL_ODDS_PATH
+MODEL_PATH = app_config.MODEL_PATH
+MODEL_VARIANT_COMPARISON_PATH = app_config.MODEL_VARIANT_COMPARISON_PATH
+MODEL_PREDICTIONS_PATH = app_config.MODEL_PREDICTIONS_PATH
+MODEL_SOURCE = app_config.MODEL_SOURCE
+ODDS_API_MARKETS = app_config.ODDS_API_MARKETS
+ODDS_API_REGIONS = app_config.ODDS_API_REGIONS
+ODDS_API_SPORT_KEY = app_config.ODDS_API_SPORT_KEY
+ODDS_SNAPSHOT_PATH = app_config.ODDS_SNAPSHOT_PATH
+PREFERRED_BOOKMAKER = app_config.PREFERRED_BOOKMAKER
+PREFERRED_BOOKMAKER_NAMES = app_config.PREFERRED_BOOKMAKER_NAMES
+PROCESSED_ODDS_PATH = app_config.PROCESSED_ODDS_PATH
+REFERENCE_FIXTURES_PATH = app_config.REFERENCE_FIXTURES_PATH
+SAMPLE_PREDICTIONS_PATH = app_config.SAMPLE_PREDICTIONS_PATH
+STAKING_PROFILES = app_config.STAKING_PROFILES
+TRAINING_DATASET_PATH = app_config.TRAINING_DATASET_PATH
+get_staking_profile = app_config.get_staking_profile
+get_secret_or_env = app_config.get_secret_or_env
+validate_staking_profile = app_config.validate_staking_profile
 from data_loader import (
     ensure_runtime_data_files,
     get_data_freshness,
