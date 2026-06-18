@@ -236,6 +236,8 @@ def init_session_state() -> None:
         st.session_state.staking_profile = get_staking_profile(DEFAULT_PROFILE_NAME)
     if "preferred_bookmaker" not in st.session_state:
         st.session_state.preferred_bookmaker = PREFERRED_BOOKMAKER
+    if "preferred_bookmaker_mode" not in st.session_state:
+        st.session_state.preferred_bookmaker_mode = "danske_spil"
     if "selected_match_id" not in st.session_state:
         st.session_state.selected_match_id = None
     if "data_mode" not in st.session_state:
@@ -497,7 +499,12 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
         return predictions, warnings, [str(exc)]
     predictions = add_match_results(predictions)
     bankroll = load_bankroll_state()["current_bankroll"]
-    enriched = add_recommendations(predictions, bankroll, current_profile())
+    enriched = add_recommendations(
+        predictions,
+        bankroll,
+        current_profile(),
+        preferred_bookmaker_mode=st.session_state.preferred_bookmaker_mode,
+    )
     return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors
 
 
@@ -529,13 +536,61 @@ def recommendation_summary(row, market: str) -> str:
     )
 
 
+def preferred_bookmaker_label() -> str:
+    return "Best market" if st.session_state.get("preferred_bookmaker_mode") == "best_market" else "Danske Spil"
+
+
+def primary_decision_title() -> str:
+    return "Best market decision" if st.session_state.get("preferred_bookmaker_mode") == "best_market" else "Danske Spil decision"
+
+
+def primary_decision_text(row) -> str:
+    mode = st.session_state.get("preferred_bookmaker_mode", "danske_spil")
+    if mode == "best_market":
+        if row.get("primary_status") == "play":
+            return f"Play {recommendation_outcome_label(row, 'best')} @ {format_odds(row.get('recommended_odds_best'))}"
+        if row.get("primary_status") == "odds_missing":
+            return "Best market odds missing"
+        return "No bet at best market"
+    if row.get("primary_status") == "play":
+        return f"Play {recommendation_outcome_label(row, 'ds')} @ {format_odds(row.get('recommended_odds_ds'))}"
+    if row.get("primary_status") == "odds_missing":
+        return "Odds missing at Danske Spil"
+    return "No bet at Danske Spil"
+
+
+def primary_stake_text(row) -> str:
+    if row.get("primary_status") != "play":
+        return ""
+    return f"Stake {format_dkk(row.get('primary_stake', 0))}"
+
+
+def best_market_note(row) -> str:
+    if row.get("recommended_outcome_best") == "No bet":
+        if all(pd.isna(row.get(f"best_{outcome}_odds")) or float(row.get(f"best_{outcome}_odds") or 0) <= 1 for outcome in ["home", "draw", "away"]):
+            return "Best market odds missing"
+        return "No better market value found"
+    summary = recommendation_summary(row, "best")
+    if st.session_state.get("preferred_bookmaker_mode", "danske_spil") == "danske_spil" and row.get("recommended_outcome_ds") == "No bet":
+        return f"{summary}. Value exists elsewhere; not playable at your selected bookmaker."
+    if row.get("recommended_outcome_ds") != "No bet" and row.get("recommended_odds_best") and row.get("recommended_odds_ds"):
+        if float(row.get("recommended_odds_best")) > float(row.get("recommended_odds_ds")) + 0.01:
+            return f"{summary}. Better odds available elsewhere."
+        return f"{summary}. Same or similar odds."
+    return summary
+
+
 def no_bet_reason(row, market: str) -> str:
     profile = current_profile()
     prefix = "ds" if market == "ds" else "best"
     outcomes = ["home", "draw", "away"]
     odds_values = [row.get(f"{prefix}_{outcome}_odds") for outcome in outcomes]
     if all(pd.isna(odds) or float(odds) <= 1 for odds in odds_values):
-        return "Missing odds for this market."
+        if market == "ds":
+            return "Danske Spil odds missing."
+        if market == "best":
+            return "Best market odds missing."
+        return "Odds missing at selected bookmaker."
 
     candidates = []
     for outcome in outcomes:
@@ -868,6 +923,8 @@ def add_recommendation_to_bet_slip(row, market: str) -> None:
     if outcome == "No bet" or pd.isna(outcome):
         st.warning("Der er ingen gyldig anbefaling at tilføje.")
         return
+    if st.session_state.get("preferred_bookmaker_mode", "danske_spil") == "danske_spil" and market == "best":
+        st.warning("This bet is not available at Danske Spil. It is added as a best-market reference bet.")
     payload = bet_payload_from_recommendation(row, market)
     slip_key = f"{payload['match_id']}|{payload['market']}|{payload['outcome']}|{payload['bookmaker']}"
     existing_keys = {
@@ -1262,16 +1319,19 @@ def odds_provenance_text(df: pd.DataFrame) -> str:
 def compact_match_card(row) -> None:
     prediction = match_prediction_summary(row)
     model_line = probability_line_for_source(row, "model")
-    market_line = probability_line_for_source(row, "market")
-    status = html.escape(str(row["recommendation_status"]))
+    status_label = {
+        "play": "Play",
+        "no_bet": "No bet",
+        "odds_missing": "Odds missing",
+    }.get(str(row.get("primary_status")), str(row["recommendation_status"]))
+    status = html.escape(status_label)
     status_class = {
-        "Playable at Danske Spil": "wc-status-green",
-        "Better elsewhere": "wc-status-amber",
-        "No bet": "wc-status-muted",
-    }.get(row["recommendation_status"], "wc-status-muted")
-    reason = no_bet_reason(row, "best") if row["recommendation_status"] == "No bet" else (
-        no_bet_reason(row, "ds") if row["recommended_outcome_ds"] == "No bet" else "Danske Spil odds are high enough to create value."
-    )
+        "play": "wc-status-green",
+        "no_bet": "wc-status-muted",
+        "odds_missing": "wc-status-amber",
+    }.get(str(row.get("primary_status")), "wc-status-muted")
+    stake = primary_stake_text(row)
+    stake_line = f"<div class=\"wc-match-line\"><b>Suggested stake:</b> {html.escape(stake)}</div>" if stake else ""
     st.markdown(
         f"""
         <div class="wc-match-compact">
@@ -1282,11 +1342,12 @@ def compact_match_card(row) -> None:
             </div>
             <div class="{status_class} wc-match-status">{status}</div>
           </div>
-          <div class="wc-match-line"><b>Favorite:</b> {html.escape(prediction['favorite'])}</div>
-          <div class="wc-match-line"><b>ML model:</b> {html.escape(model_line)}</div>
-          <div class="wc-match-line"><b>Market odds:</b> {html.escape(market_line)}</div>
-          <div class="wc-match-line"><b>Betting decision:</b> {html.escape(betting_decision_summary(row))} · <b>Danske Spil:</b> {html.escape(recommendation_summary(row, 'ds'))} · <b>Best market:</b> {html.escape(recommendation_summary(row, 'best'))}</div>
-          <div class="wc-match-reason">{html.escape(reason)}</div>
+          <div class="wc-match-line"><b>Favorite:</b> {html.escape(str(row.get('model_favorite_label', prediction['favorite'])))} · {html.escape(format_probability(row.get('model_favorite_probability', 0)))}</div>
+          <div class="wc-match-line"><b>Prediction:</b> {html.escape(model_line)}</div>
+          <div class="wc-match-line"><b>{html.escape(primary_decision_title())}:</b> {html.escape(primary_decision_text(row))}</div>
+          {stake_line}
+          <div class="wc-match-reason"><b>Reason:</b> {html.escape(str(row.get('primary_reason') or no_bet_reason(row, 'ds')))}</div>
+          <div class="wc-match-line"><b>Best market:</b> {html.escape(best_market_note(row))}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1302,7 +1363,7 @@ def page_overview(df: pd.DataFrame) -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.caption(f"Live data · {len(active_df)} upcoming matches · Prediction source: Best available")
+    st.caption(f"Live data · {len(active_df)} upcoming matches · Preferred bookmaker: {preferred_bookmaker_label()}")
     st.caption(odds_provenance_text(active_df))
     if not archived_df.empty:
         st.caption(f"{len(archived_df)} afviklede kampe er flyttet til Match Archive.")
@@ -1341,7 +1402,7 @@ def page_overview(df: pd.DataFrame) -> None:
         st.info(
             "Live mode uses fetched odds and the best available prediction source. If model predictions cannot be generated, market probabilities are used as fallback."
         )
-    st.caption("Prediction source: Best available")
+    st.caption(f"Recommendations use {preferred_bookmaker_label()} first. Best market odds are shown as comparison.")
 
     with st.expander("Filtre", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
@@ -1360,7 +1421,7 @@ def page_overview(df: pd.DataFrame) -> None:
 
     filtered = df[df["group"].isin(groups) & df["matchday"].isin(matchdays)].copy()
     if recommended_only:
-        filtered = filtered[filtered["recommendation_status"] != "No bet"]
+        filtered = filtered[filtered["primary_status"] == "play"]
     if positive_edge_only:
         filtered = filtered[(filtered["recommended_edge_ds"] > 0) | (filtered["recommended_edge_best"] > 0)]
     if draw_value_only:
@@ -1370,7 +1431,7 @@ def page_overview(df: pd.DataFrame) -> None:
     if high_draw_only:
         filtered = filtered[filtered["draw_context_label"] == "High"]
     if playable_ds_only:
-        filtered = filtered[filtered["recommendation_status"] == "Playable at Danske Spil"]
+        filtered = filtered[filtered["recommended_outcome_ds"] != "No bet"]
     if better_elsewhere_only:
         filtered = filtered[filtered["recommendation_status"] == "Better elsewhere"]
     if "kickoff_time" in filtered.columns:
@@ -1478,40 +1539,35 @@ def render_ds_no_bet_row(row) -> None:
 def page_betting_center(df: pd.DataFrame) -> None:
     df, archived = split_active_and_archived_matches(df)
     st.title("Betting Center")
-    st.caption("Value bets, Danske Spil checks, best market odds and your bet slip.")
+    st.caption(f"Recommendations are based on {preferred_bookmaker_label()} first. Best market odds are kept as reference.")
     if not archived.empty:
         st.caption(f"{len(archived)} afviklede kampe er flyttet til Match Archive og er ikke spilbare her.")
-    value_tab, ds_tab, best_tab, slip_tab = st.tabs(["Value bets", "Danske Spil", "Best market", "Bet slip"])
-
-    with value_tab:
-        value_df = df[df["recommendation_status"].isin(["Playable at Danske Spil", "Better elsewhere"])].copy()
-        if value_df.empty:
-            empty_state("No value bets found with the current thresholds. This means no available odds currently pass the edge and Kelly requirements.")
-        else:
-            value_df["sort_edge"] = value_df[["recommended_edge_ds", "recommended_edge_best"]].max(axis=1)
-            value_df["sort_stake"] = value_df[["recommended_stake_ds", "recommended_stake_best"]].max(axis=1)
-            value_df = value_df.sort_values(["sort_edge", "sort_stake", "kickoff_time"], ascending=[False, False, True])
-            for _, row in value_df.iterrows():
-                render_value_bet_card(row, recommended_market(row), "value")
+    ds_tab, elsewhere_tab, best_tab, slip_tab = st.tabs(["Danske Spil", "Value elsewhere", "Best market", "Bet slip"])
 
     with ds_tab:
         st.subheader("Playable at Danske Spil")
         playable = df[df["recommended_outcome_ds"] != "No bet"].copy()
         if playable.empty:
-            empty_state("No bets are currently playable at Danske Spil.")
+            empty_state("No playable bets at Danske Spil with the current odds and risk settings.")
         else:
             playable = playable.sort_values(["recommended_edge_ds", "recommended_stake_ds", "kickoff_time"], ascending=[False, False, True])
             for _, row in playable.iterrows():
                 render_value_bet_card(row, "ds", "ds")
-        st.subheader("No bet at Danske Spil")
-        no_ds = df[df["recommended_outcome_ds"] == "No bet"].copy()
-        if no_ds.empty:
-            empty_state("Every loaded match with odds currently has a Danske Spil recommendation.")
+
+    with elsewhere_tab:
+        st.subheader("Value elsewhere")
+        st.caption("These are value bets elsewhere, not at your selected bookmaker.")
+        elsewhere = df[(df["recommended_outcome_ds"] == "No bet") & (df["recommended_outcome_best"] != "No bet")].copy()
+        if elsewhere.empty:
+            empty_state("No value bets elsewhere that are unavailable or unplayable at Danske Spil.")
         else:
-            for _, row in no_ds.iterrows():
-                render_ds_no_bet_row(row)
+            elsewhere = elsewhere.sort_values(["recommended_edge_best", "recommended_stake_best", "kickoff_time"], ascending=[False, False, True])
+            for _, row in elsewhere.iterrows():
+                render_value_bet_card(row, "best", "elsewhere")
+                st.caption("Stake if betting elsewhere: " + format_dkk(row["recommended_stake_best"]))
 
     with best_tab:
+        st.subheader("Best market")
         best = df[df["recommended_outcome_best"] != "No bet"].copy()
         if best.empty:
             empty_state("No best-market value bets found.")
@@ -1566,11 +1622,11 @@ def page_match_detail(df: pd.DataFrame) -> None:
 
     h1, h2, h3 = st.columns(3)
     with h1:
-        metric_card("Favorite", prediction["favorite"], "The team with the highest predicted win probability.")
+        metric_card("Favorite", f"{row.get('model_favorite_label', prediction['favorite'])} · {format_probability(row.get('model_favorite_probability', 0))}", "The most likely outcome according to the model.")
     with h2:
         metric_card("Prediction", prediction["line"])
     with h3:
-        metric_card("Betting decision", row["recommendation_status"], betting_decision_summary(row))
+        metric_card("Preferred bookmaker", preferred_bookmaker_label(), "Choose where you normally place bets. Recommendations use this bookmaker first.")
     st.caption("Prediction source: Best available")
 
     source_cols = st.columns(2)
@@ -1606,12 +1662,12 @@ def page_match_detail(df: pd.DataFrame) -> None:
     else:
         prob_df = pd.DataFrame()
 
-    st.subheader("Betting decision")
+    st.subheader(primary_decision_title())
     c1, c2 = st.columns(2)
     with c1:
         recommendation_card_v2(
-            "Danske Spil",
-            "Playable at Danske Spil" if row["recommended_outcome_ds"] != "No bet" else "No bet",
+            "Danske Spil decision",
+            "Play at Danske Spil" if row["recommended_outcome_ds"] != "No bet" else ("Odds missing at Danske Spil" if row.get("primary_status") == "odds_missing" else "No bet at Danske Spil"),
             recommendation_outcome_label(row, "ds"),
             row["recommended_odds_ds"],
             "Danske Spil",
@@ -1619,7 +1675,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_fractional_kelly_ds"],
             row["recommended_stake_ds"],
             probability_source_label(row),
-            reason=no_bet_reason(row, "ds"),
+            reason=row.get("primary_reason") if st.session_state.get("preferred_bookmaker_mode", "danske_spil") == "danske_spil" else no_bet_reason(row, "ds"),
         )
         if row["recommended_outcome_ds"] == "No bet":
             st.caption(f"Why disabled: {no_bet_reason(row, 'ds')}")
@@ -1631,8 +1687,8 @@ def page_match_detail(df: pd.DataFrame) -> None:
         )
     with c2:
         recommendation_card_v2(
-            "Best market",
-            row["recommendation_status"] if row["recommended_outcome_best"] != "No bet" else "No bet",
+            "Best market comparison",
+            "Better odds available elsewhere" if row.get("comparison_status") == "better_elsewhere" else ("Best market odds missing" if row.get("comparison_status") == "comparison_missing" else "No better market value found" if row["recommended_outcome_best"] == "No bet" else "Same or similar odds"),
             recommendation_outcome_label(row, "best"),
             row["recommended_odds_best"],
             row["recommended_bookmaker_best"],
@@ -1640,7 +1696,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
             row["recommended_fractional_kelly_best"],
             row["recommended_stake_best"],
             probability_source_label(row),
-            reason=no_bet_reason(row, "best"),
+            reason=best_market_note(row),
         )
         if row["recommended_outcome_best"] == "No bet":
             st.caption(f"Why disabled: {no_bet_reason(row, 'best')}")
@@ -1659,7 +1715,23 @@ def page_match_detail(df: pd.DataFrame) -> None:
         row["one_team_must_win"],
     )
 
-    with st.expander("Advanced probability details"):
+    with st.expander("Advanced probability and value details"):
+        value_rows = []
+        for market, bookmaker in [("ds", "Danske Spil"), ("best", row.get("recommended_bookmaker_best") or "Best market")]:
+            value_rows.append(
+                {
+                    "Bookmaker": bookmaker,
+                    "Outcome": recommendation_outcome_label(row, market),
+                    "Odds": format_odds(row.get(f"recommended_odds_{market}")),
+                    "Model probability": format_probability(row.get(f"recommended_probability_{market}")),
+                    "Market probability": format_probability(row.get(f"recommended_implied_probability_{market}")),
+                    "Fair odds": format_odds(row.get(f"recommended_fair_odds_{market}")),
+                    "Edge": format_percentage(row.get(f"recommended_edge_{market}", 0)),
+                    "Kelly": format_percentage(row.get(f"recommended_fractional_kelly_{market}", 0)),
+                    "Stake": format_dkk(row.get(f"recommended_stake_{market}", 0)),
+                }
+            )
+        st.dataframe(pd.DataFrame(value_rows), width="stretch", hide_index=True)
         st.caption(f"Technical source: {technical_probability_source_label(row)}")
         if probability_triplets_are_identical(row):
             st.info("These values are identical because the app is currently using market probabilities as fallback.")
@@ -2283,6 +2355,25 @@ def page_user_settings() -> None:
     st.title("Settings")
     st.caption("Simple app settings for bankroll, risk and odds updates.")
 
+    st.subheader("Preferred bookmaker")
+    bookmaker_options = {"Danske Spil": "danske_spil", "Best market": "best_market"}
+    reverse_bookmaker_options = {value: key for key, value in bookmaker_options.items()}
+    selected_bookmaker_label = st.radio(
+        "Where do you usually bet?",
+        list(bookmaker_options.keys()),
+        index=list(bookmaker_options.keys()).index(
+            reverse_bookmaker_options.get(st.session_state.preferred_bookmaker_mode, "Danske Spil")
+        ),
+        horizontal=True,
+        help="Choose where you normally place bets. Recommendations will be based on this bookmaker first.",
+        key="user_preferred_bookmaker_mode",
+    )
+    selected_bookmaker_mode = bookmaker_options[selected_bookmaker_label]
+    if st.session_state.preferred_bookmaker_mode != selected_bookmaker_mode:
+        st.session_state.preferred_bookmaker_mode = selected_bookmaker_mode
+        st.rerun()
+    st.caption("Best market odds are still shown as comparison.")
+
     st.subheader("Bankroll")
     st.caption("Used to calculate suggested stake.")
     state = load_bankroll_state()
@@ -2840,6 +2931,25 @@ def page_settings() -> None:
     st.info(
         "Normal users do not need this page. The app automatically uses the best available predictions and falls back to market probabilities when model files are unavailable."
     )
+    st.subheader("Preferred bookmaker")
+    bookmaker_options = {"Danske Spil": "danske_spil", "Best market": "best_market"}
+    reverse_bookmaker_options = {value: key for key, value in bookmaker_options.items()}
+    selected_bookmaker_label = st.radio(
+        "Where do you usually bet?",
+        list(bookmaker_options.keys()),
+        index=list(bookmaker_options.keys()).index(
+            reverse_bookmaker_options.get(st.session_state.preferred_bookmaker_mode, "Danske Spil")
+        ),
+        horizontal=True,
+        help="Choose where you normally place bets. Recommendations will be based on this bookmaker first.",
+        key="admin_preferred_bookmaker_mode",
+    )
+    selected_bookmaker_mode = bookmaker_options[selected_bookmaker_label]
+    if st.session_state.preferred_bookmaker_mode != selected_bookmaker_mode:
+        st.session_state.preferred_bookmaker_mode = selected_bookmaker_mode
+        st.rerun()
+    st.caption("Best market odds are still shown as comparison.")
+
     st.subheader("Data mode")
     mode_labels = {
         "Official fixtures": "official",

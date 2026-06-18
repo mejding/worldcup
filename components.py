@@ -133,7 +133,14 @@ def recommendation_card_v2(
 ) -> None:
     status_class = {
         "Playable at Danske Spil": "wc-status-green",
+        "Play at Danske Spil": "wc-status-green",
         "Better elsewhere": "wc-status-amber",
+        "Better odds available elsewhere": "wc-status-amber",
+        "Odds missing at Danske Spil": "wc-status-amber",
+        "Best market odds missing": "wc-status-amber",
+        "No bet at Danske Spil": "wc-status-muted",
+        "No better market value found": "wc-status-muted",
+        "Same or similar odds": "wc-status-green",
         "No bet": "wc-status-muted",
         "Playable": "wc-status-green",
     }.get(status, "wc-status-muted")
