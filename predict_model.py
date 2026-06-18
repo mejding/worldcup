@@ -4,9 +4,18 @@ from typing import Union
 import joblib
 import pandas as pd
 
-from config import FIFA_RANKINGS_PATH, LIVE_PREDICTIONS_WITH_MODEL_PATH, MODEL_PATH
+import config as app_config
 from features import FEATURE_COLUMNS, build_upcoming_feature_dataset
 from fifa_rankings import load_fifa_rankings
+
+
+FIFA_RANKINGS_PATH = getattr(
+    app_config,
+    "FIFA_RANKINGS_PATH",
+    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+)
+LIVE_PREDICTIONS_WITH_MODEL_PATH = app_config.LIVE_PREDICTIONS_WITH_MODEL_PATH
+MODEL_PATH = app_config.MODEL_PATH
 
 
 def load_trained_model(model_path: Union[str, Path] = MODEL_PATH):

@@ -5,15 +5,24 @@ from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from config import (
-    FIFA_FEATURE_COVERAGE_PATH,
-    FIFA_RANKING_FEATURE_REPORT_PATH,
-    MODEL_VARIANT_COMPARISON_PATH,
-)
+import config as app_config
 from evaluation import calculate_prediction_metrics
 from features import build_training_dataset
 from fifa_rankings import create_fifa_feature_coverage, load_fifa_rankings
 from train_model import _split_train_test, train_model_in_memory
+
+
+FIFA_FEATURE_COVERAGE_PATH = getattr(
+    app_config,
+    "FIFA_FEATURE_COVERAGE_PATH",
+    app_config.PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
+)
+FIFA_RANKING_FEATURE_REPORT_PATH = getattr(
+    app_config,
+    "FIFA_RANKING_FEATURE_REPORT_PATH",
+    app_config.REPORTS_DIR / "fifa_ranking_feature_report.md",
+)
+MODEL_VARIANT_COMPARISON_PATH = app_config.MODEL_VARIANT_COMPARISON_PATH
 
 
 MODEL_VARIANTS = {

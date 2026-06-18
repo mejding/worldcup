@@ -8,7 +8,14 @@ from typing import Union
 import pandas as pd
 from pandas.errors import EmptyDataError
 
-from config import FIFA_RANKINGS_PATH
+import config as app_config
+
+
+FIFA_RANKINGS_PATH = getattr(
+    app_config,
+    "FIFA_RANKINGS_PATH",
+    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+)
 
 
 REQUIRED_COLUMNS = ["ranking_date", "team", "fifa_rank", "fifa_points"]

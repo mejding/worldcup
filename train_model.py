@@ -14,7 +14,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from config import FEATURE_COLUMNS_PATH, FIFA_RANKINGS_PATH, MODEL_METADATA_PATH, MODEL_PATH
+import config as app_config
 from evaluation import (
     calculate_accuracy,
     calculate_log_loss,
@@ -25,6 +25,16 @@ from features import FEATURE_COLUMNS, build_training_dataset, get_feature_column
 from fifa_rankings import load_fifa_rankings
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from model_readiness import PRODUCTION_MIN_TEST_ROWS, PRODUCTION_MIN_TRAINING_ROWS
+
+
+FEATURE_COLUMNS_PATH = app_config.FEATURE_COLUMNS_PATH
+FIFA_RANKINGS_PATH = getattr(
+    app_config,
+    "FIFA_RANKINGS_PATH",
+    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+)
+MODEL_METADATA_PATH = app_config.MODEL_METADATA_PATH
+MODEL_PATH = app_config.MODEL_PATH
 
 
 def _split_train_test(training_df: pd.DataFrame, test_start_date: str = None):
