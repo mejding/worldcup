@@ -126,8 +126,22 @@ def _run_single_fold(fold_id: int, train_raw: pd.DataFrame, test_raw: pd.DataFra
     output = output.rename(columns={"result": "actual_result"})
     output.insert(0, "fold_id", fold_id)
     output["is_correct"] = output["predicted_result"] == output["actual_result"]
+    output["model_home_prob"] = output["pred_home_prob"]
+    output["model_draw_prob"] = output["pred_draw_prob"]
+    output["model_away_prob"] = output["pred_away_prob"]
+    optional_columns = [
+        "market_home_prob",
+        "market_draw_prob",
+        "market_away_prob",
+        "fifa_ranking_gap",
+        "elo_gap",
+        "draw_context_label",
+    ]
+    for column in optional_columns:
+        if column in test_raw.columns:
+            output[column] = test_raw.sort_values("date")[column].reset_index(drop=True)
     metrics = calculate_prediction_metrics(output["actual_result"].tolist(), output[["pred_home_prob", "pred_draw_prob", "pred_away_prob"]].to_numpy())
-    return output[PREDICTION_COLUMNS], metrics
+    return output[PREDICTION_COLUMNS + [column for column in output.columns if column not in PREDICTION_COLUMNS]], metrics
 
 
 def _summary_row(fold_id: int, train_raw: pd.DataFrame, test_raw: pd.DataFrame, metrics: dict) -> dict:

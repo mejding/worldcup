@@ -402,13 +402,13 @@ Metrics shown:
 
 Market probabilities remain an important benchmark and are preserved in the app. Model probabilities replace only `model_home_prob`, `model_draw_prob` and `model_away_prob` when the historical model is selected and applied.
 
-## Backtesting and Metrics
+## Backtesting, Full Validation and Model Performance
 
-Sprint 7 adds time-based model backtesting. The backtest currently evaluates the historical model only. Market-aware ensemble will be added in a later sprint.
+The app supports both a standard walk-forward backtest and a full model validation flow. Model Performance is designed to answer a normal user question first: can I trust the predictions?
 
 The app uses walk-forward backtesting because football prediction is a chronological problem: a model should only train on matches that happened before the matches it predicts. A random split is not appropriate for reporting because it can mix future information into training, especially through team form, Elo and tournament context features.
 
-Run the backtest from `Advanced / Admin`:
+Run the standard backtest from `Advanced / Admin`:
 
 1. Add historical data at `data/historical/international_results.csv`.
 2. Choose an initial train end date, test window, step size and minimum training matches.
@@ -433,6 +433,65 @@ Metrics:
 - Draw calibration gap: predicted draw rate minus actual draw rate. A positive value means the model overpredicts draws.
 
 The overall international backtest is the broadest and most stable view of model quality. The major tournament segment isolates World Cup, Euros, Copa América, AFCON, Asian Cup and Gold Cup-style matches inside the same walk-forward run. The World Cup-only sanity check trains before each selected World Cup year and tests only that tournament, but those samples are small and should not be treated as definitive evidence.
+
+### Full Model Validation
+
+Full validation runs the realistic walk-forward test, calculates probability calibration, compares the model with historical bookmaker-implied probabilities when available, tests market/model ensemble weights, and saves the best validated prediction source.
+
+Run it from `Advanced / Admin`:
+
+1. Add historical match data at `data/historical/international_results.csv`.
+2. Optionally include historical market probabilities: `market_home_prob`, `market_draw_prob`, `market_away_prob`.
+3. Click `Run full model validation`.
+
+You can also run it from the terminal:
+
+```bash
+python scripts/run_full_validation.py
+```
+
+Full validation output files:
+
+- `data/processed/full_backtest_predictions.csv`
+- `data/processed/full_backtest_summary.csv`
+- `data/processed/full_backtest_by_fold.csv`
+- `data/processed/full_backtest_by_segment.csv`
+- `data/processed/full_backtest_calibration.csv`
+- `data/processed/full_backtest_draw_calibration.csv`
+- `data/processed/full_backtest_market_comparison.csv`
+- `data/processed/best_prediction_source_validation.json`
+- `data/reports/full_backtest_report.md`
+
+Best prediction source selection prioritizes probability quality:
+
+1. Lowest log loss
+2. Lowest Brier score
+3. Lowest calibration error
+4. Draw calibration closest to reality
+5. Accuracy as a secondary tie-breaker
+
+The app does not select a more complex source if the improvement over market-only probabilities is negligible.
+
+If historical market probabilities are missing, the app still completes the ML walk-forward validation, but it will show:
+
+```text
+Market comparison cannot be calculated because historical market odds are not available.
+```
+
+In that case the app must not claim that the model beats the market. Market comparison matters because betting value depends on whether the model can add information beyond bookmaker-implied probabilities.
+
+### Reading Model Performance
+
+The Model Performance page uses simple labels:
+
+- Model confidence: High, Medium or Low
+- Betting use: Ready, Use cautiously or Market fallback
+- Prediction accuracy: how often the model picked the correct 1X2 outcome
+- Probability quality: log loss, lower is better
+- Prediction error: Brier score, lower is better
+- Probability realism: calibration, lower is better
+
+Technical tables and raw metadata are kept inside `Advanced model metrics`.
 
 ## Draw Hypothesis and Draw-Context Features
 

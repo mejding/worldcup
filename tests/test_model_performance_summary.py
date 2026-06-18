@@ -22,7 +22,7 @@ def _model_status():
     }
 
 
-def test_production_model_with_holdout_metrics_is_good_baseline():
+def test_production_model_with_holdout_metrics_is_medium_if_full_validation_missing():
     performance = load_model_performance_summary(
         metadata={},
         readiness=_readiness(),
@@ -32,8 +32,10 @@ def test_production_model_with_holdout_metrics_is_good_baseline():
     )
     quality = build_model_quality_summary({}, performance, pd.DataFrame())
 
-    assert quality["quality_label"] == "Good baseline model"
-    assert "production-ready" in quality["user_conclusion"]
+    assert quality["quality_label"] == "Model confidence: Medium"
+    assert performance["model_confidence"] == "Medium"
+    assert performance["betting_use"] == "Use cautiously"
+    assert "conservative" in quality["user_conclusion"]
 
 
 def test_missing_calibration_is_explicit_not_dash():
@@ -60,6 +62,40 @@ def test_missing_market_comparison_is_reported():
 
     assert performance["market_comparison_available"] is False
     assert "Market comparison not available" in performance["missing_items"]
+
+
+def test_full_validation_with_market_comparison_is_high_confidence():
+    comparison = pd.DataFrame(
+        {
+            "source": ["market", "ensemble_0.8_0.2"],
+            "source_name": ["market", "ensemble_0.8_0.2"],
+            "match_count": [1000, 1000],
+            "accuracy": [0.55, 0.57],
+            "log_loss": [0.92, 0.90],
+            "brier_score": [0.54, 0.52],
+            "ece": [0.04, 0.02],
+            "draw_calibration_gap": [0.03, 0.01],
+        }
+    )
+    performance = load_model_performance_summary(
+        metadata={},
+        readiness=_readiness(),
+        model_status=_model_status(),
+        backtest_status={
+            "backtest_exists": True,
+            "prediction_count": 1000,
+            "overall_accuracy": 0.57,
+            "overall_log_loss": 0.90,
+            "overall_brier_score": 0.52,
+            "overall_ece": 0.02,
+        },
+        comparison_df=comparison,
+    )
+    quality = build_model_quality_summary({}, performance, comparison)
+
+    assert performance["model_confidence"] == "High"
+    assert performance["betting_use"] == "Ready"
+    assert quality["quality_label"] == "Model confidence: High"
 
 
 def test_full_backtest_takes_priority_over_metadata():
@@ -92,7 +128,7 @@ def test_demo_model_produces_demo_warning():
     )
     quality = build_model_quality_summary({}, performance, pd.DataFrame())
 
-    assert quality["quality_label"] == "Demo model"
+    assert quality["quality_label"] == "Model confidence: Low"
     assert "market odds as fallback" in quality["summary_text"]
 
 
@@ -106,5 +142,5 @@ def test_no_model_produces_fallback_message():
     )
     quality = build_model_quality_summary({}, performance, pd.DataFrame())
 
-    assert quality["quality_label"] == "Model unavailable"
+    assert quality["quality_label"] == "Model confidence: Low"
     assert "market odds as fallback" in quality["headline"]

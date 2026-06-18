@@ -17,6 +17,15 @@ STANDARD_COLUMNS = [
     "result",
 ]
 
+OPTIONAL_HISTORICAL_COLUMNS = [
+    "market_home_prob",
+    "market_draw_prob",
+    "market_away_prob",
+    "fifa_ranking_gap",
+    "elo_gap",
+    "draw_context_label",
+]
+
 
 def load_historical_results(path: Union[str, Path] = HISTORICAL_RESULTS_PATH) -> pd.DataFrame:
     path = Path(path)
@@ -51,7 +60,8 @@ def standardize_historical_results(df: pd.DataFrame) -> pd.DataFrame:
     for column in STANDARD_COLUMNS:
         if column not in result.columns:
             result[column] = pd.NA
-    return result[STANDARD_COLUMNS]
+    optional_columns = [column for column in OPTIONAL_HISTORICAL_COLUMNS if column in result.columns]
+    return result[STANDARD_COLUMNS + optional_columns]
 
 
 def clean_historical_results_for_training(df: pd.DataFrame, as_of=None) -> pd.DataFrame:

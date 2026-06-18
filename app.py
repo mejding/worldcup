@@ -70,6 +70,9 @@ from backtest_paths import (
     ENSEMBLE_COMPARISON_PATH,
     ENSEMBLE_PREDICTIONS_PATH,
     ENSEMBLE_REPORT_PATH,
+    FULL_BACKTEST_BY_FOLD_PATH,
+    FULL_BACKTEST_MARKET_COMPARISON_PATH,
+    FULL_BACKTEST_SUMMARY_PATH,
     PROCESSED_DATA_DIR,
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
@@ -188,6 +191,7 @@ from probability_sources import (
 from predict_model import apply_stored_model_predictions, predict_upcoming_matches, prediction_file_uses_market_as_model
 from recommendations import add_recommendations
 from time_utils import add_danish_kickoff_column, format_danish_kickoff
+from walk_forward_backtest import run_full_walk_forward_backtest
 from tooltip_definitions import TOOLTIPS
 from train_model import train_historical_model
 from ui_navigation import PAGES, apply_navigation_css, render_sidebar_navigation, render_sidebar_status_card
@@ -2064,9 +2068,10 @@ def _render_quality_card(quality: dict) -> None:
     st.markdown(
         f"""
         <div style="border:1px solid {color[2]}; background:{color[1]}; border-radius:8px; padding:16px 18px; margin: 4px 0 14px 0;">
-          <div style="font-size:0.82rem; color:{color[0]}; font-weight:700; text-transform:uppercase;">Model quality: {html.escape(quality['quality_label'])}</div>
+          <div style="font-size:0.82rem; color:{color[0]}; font-weight:700; text-transform:uppercase;">{html.escape(quality['quality_label'])}</div>
           <div style="font-size:1.2rem; color:#111827; font-weight:700; margin-top:4px;">{html.escape(quality['headline'])}</div>
           <div style="color:#374151; margin-top:6px;">{html.escape(quality['summary_text'])}</div>
+          <div style="color:#111827; margin-top:8px;">Betting use: <strong>{html.escape(quality.get('betting_use', 'Use cautiously'))}</strong></div>
           <div style="color:#111827; margin-top:10px; font-weight:600;">{html.escape(quality['user_conclusion'])}</div>
         </div>
         """,
@@ -2077,12 +2082,12 @@ def _render_quality_card(quality: dict) -> None:
 def _render_market_comparison(comparison_df: pd.DataFrame, best_source: Optional[dict]) -> None:
     st.subheader("Model vs market")
     if comparison_df is None or comparison_df.empty:
-        empty_state("Market comparison has not been calculated yet.")
+        empty_state("Market comparison cannot be calculated because historical market odds are not available.")
         st.write(
             "The current metrics show how the model performed on historical matches, but they do not yet tell "
             "whether it beats bookmaker-implied probabilities."
         )
-        st.info("Recommended action: run market comparison / full backtest in Advanced / Admin.")
+        st.info("Recommended action: add historical market odds, then run full model validation in Advanced / Admin.")
         if st.button("Go to Advanced / Admin", key="model_perf_go_admin_market"):
             st.session_state.current_page = "Advanced / Admin"
             st.session_state.page = "Advanced / Admin"
@@ -2096,9 +2101,9 @@ def _render_market_comparison(comparison_df: pd.DataFrame, best_source: Optional
             {
                 "Source": _source_label(source),
                 "Accuracy": display_metric_value("accuracy", row.get("accuracy")),
-                "Log Loss": display_metric_value("log_loss", row.get("log_loss")),
-                "Brier": display_metric_value("brier_score", row.get("brier_score")),
-                "Calibration": display_metric_value("ece", row.get("ece")),
+                "Probability quality": display_metric_value("log_loss", row.get("log_loss")),
+                "Prediction error": display_metric_value("brier_score", row.get("brier_score")),
+                "Probability realism": display_metric_value("ece", row.get("ece")),
                 "Matches": display_metric_value("match_count", row.get("match_count")),
                 "Best": "Yes" if best_source and source == best_source.get("source_name") else "",
             }
@@ -2124,8 +2129,8 @@ def _render_betting_implication(summary: dict, quality: dict) -> None:
         )
     else:
         st.write(
-            "The model appears strong on historical holdout data, but we have not yet confirmed whether it beats market odds. "
-            "Betting recommendations should therefore remain conservative and use market odds as part of the best available prediction source."
+            "We do not yet know if the model is better than the betting market. Market odds remain an important reference point, "
+            "and suggested stakes should be interpreted conservatively."
         )
     if not summary.get("calibration_available"):
         st.warning("Because calibration is not yet calculated, stake suggestions should be interpreted conservatively.")
@@ -2139,7 +2144,9 @@ def page_model_performance() -> None:
     model_status = get_active_model_status()
     readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     backtest_status = get_latest_backtest_status()
-    ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
+    ensemble_df = _load_optional_csv(FULL_BACKTEST_MARKET_COMPARISON_PATH)
+    if ensemble_df.empty:
+        ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
     performance = load_model_performance_summary(
         readiness=readiness,
         model_status=model_status,
@@ -2150,23 +2157,23 @@ def page_model_performance() -> None:
 
     _render_quality_card(quality)
 
-    st.subheader("Prediction quality metrics")
+    st.subheader("Key numbers")
     metric_columns = st.columns(5)
     metrics = [
-        ("Accuracy", "accuracy", performance.get("accuracy")),
-        ("Log Loss", "log_loss", performance.get("log_loss")),
-        ("Brier Score", "brier_score", performance.get("brier_score")),
-        ("Calibration", "ece", performance.get("ece")),
-        ("Matches", "match_count", performance.get("match_count")),
+        ("Prediction accuracy", "accuracy", performance.get("accuracy")),
+        ("Probability quality", "log_loss", performance.get("log_loss")),
+        ("Prediction error", "brier_score", performance.get("brier_score")),
+        ("Probability realism", "ece", performance.get("ece")),
+        ("Matches tested", "match_count", performance.get("match_count")),
     ]
     for column, (label, metric_name, value) in zip(metric_columns, metrics):
         with column:
             _metric_card(label, metric_name, value)
     if performance["metrics_source"] == "holdout_metadata":
-        st.caption("These results come from the pre-trained model's holdout test set.")
-        st.caption("Holdout metrics are useful, but full backtest and market comparison are needed to fully validate betting performance.")
+        st.caption("These results come from the pre-trained model's basic test set.")
+        st.caption("Basic test results are useful, but full historical validation and market comparison are needed to fully validate betting performance.")
     elif performance["metrics_source"] == "full_backtest":
-        st.caption("These results come from the full walk-forward backtest.")
+        st.caption("These results come from the realistic historical test.")
     else:
         st.info("Model performance has not been calculated yet.")
 
@@ -2176,14 +2183,10 @@ def page_model_performance() -> None:
     checklist = validation_checklist(performance)
     checklist_df = pd.DataFrame([{**item, "Status": _status_icon(item["Status"])} for item in checklist])
     st.dataframe(checklist_df, width="stretch", hide_index=True)
-    if performance["missing_items"]:
-        st.warning("The model is usable as a baseline, but full validation is not complete.")
-    if not performance["full_backtest_available"]:
-        st.info("Full walk-forward backtest has not been run yet.")
 
     _render_betting_implication(performance, quality)
 
-    with st.expander("Advanced model details"):
+    with st.expander("Advanced model metrics"):
         st.caption("Technical details and diagnostics are kept here so the main page stays readable.")
         metric_row(
             [
@@ -2222,6 +2225,14 @@ def page_model_performance() -> None:
         if not ensemble_df.empty:
             st.subheader("Market/model/ensemble")
             st.dataframe(ensemble_df, width="stretch", hide_index=True)
+        full_summary_df = _load_optional_csv(FULL_BACKTEST_SUMMARY_PATH)
+        full_fold_df = _load_optional_csv(FULL_BACKTEST_BY_FOLD_PATH)
+        if not full_summary_df.empty:
+            st.subheader("Full validation summary")
+            st.dataframe(full_summary_df, width="stretch", hide_index=True)
+        if not full_fold_df.empty:
+            st.subheader("Fold metrics")
+            st.dataframe(full_fold_df, width="stretch", hide_index=True)
         with st.expander("Raw model metadata"):
             st.json(readiness.get("metadata", {}))
 
@@ -2402,7 +2413,7 @@ def page_backtest_metrics() -> None:
     test_window = c2.text_input("Test window", value="365D")
     step_size = c3.text_input("Step size", value="365D")
     min_train_matches = c4.number_input("Min train matches", min_value=30, value=30, step=25)
-    run_col, wc_col = st.columns(2)
+    run_col, wc_col, full_col = st.columns(3)
     with run_col:
         if st.button("Run walk-forward backtest"):
             if not historical_exists:
@@ -2446,6 +2457,42 @@ def page_backtest_metrics() -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not run World Cup sanity check: {exc}")
+    with full_col:
+        if st.button("Run full model validation"):
+            if not historical_exists:
+                st.error("Full validation is unavailable because historical training data is not included in this deployment.")
+            else:
+                try:
+                    raw = load_historical_results(HISTORICAL_RESULTS_PATH)
+                    warnings, errors = validate_historical_results(raw)
+                    for warning in warnings:
+                        st.warning(warning)
+                    if errors:
+                        for error in errors:
+                            st.error(error)
+                    else:
+                        standardized = standardize_historical_results(raw)
+                        with st.spinner("Running full walk-forward validation..."):
+                            result = run_full_walk_forward_backtest(
+                                standardized,
+                                initial_train_end_date=None,
+                                test_window_months=12,
+                                step_months=12,
+                                min_train_matches=int(min_train_matches),
+                                model_variant="best_available",
+                            )
+                        if result.get("status") == "validation_error":
+                            st.error(result.get("error", "Full validation could not be completed."))
+                        else:
+                            comparison = result.get("market_comparison", pd.DataFrame())
+                            if comparison.empty:
+                                st.warning("Full model validation ran, but market comparison cannot be calculated because historical market odds are not available.")
+                            else:
+                                st.success("Full model validation complete, including market comparison.")
+                            st.caption(f"Predictions: {len(result.get('predictions', pd.DataFrame()))}")
+                            st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not run full model validation: {exc}")
 
     variant_label = st.radio("Model variant", ["Baseline model", "Draw-context model"], horizontal=True)
     predictions_path = BACKTEST_PREDICTIONS_WITH_DRAW_FEATURES_PATH if variant_label == "Draw-context model" else BACKTEST_PREDICTIONS_PATH
