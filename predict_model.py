@@ -4,8 +4,9 @@ from typing import Union
 import joblib
 import pandas as pd
 
-from config import LIVE_PREDICTIONS_WITH_MODEL_PATH, MODEL_PATH
+from config import FIFA_RANKINGS_PATH, LIVE_PREDICTIONS_WITH_MODEL_PATH, MODEL_PATH
 from features import FEATURE_COLUMNS, build_upcoming_feature_dataset
+from fifa_rankings import load_fifa_rankings
 
 
 def load_trained_model(model_path: Union[str, Path] = MODEL_PATH):
@@ -85,6 +86,7 @@ def predict_upcoming_matches(
     model_path: Union[str, Path] = MODEL_PATH,
     output_path: Union[str, Path] = LIVE_PREDICTIONS_WITH_MODEL_PATH,
     include_draw_context_features: bool = False,
+    fifa_rankings_path: Union[str, Path] = FIFA_RANKINGS_PATH,
 ) -> tuple[pd.DataFrame, list[str]]:
     warnings = []
     try:
@@ -97,8 +99,17 @@ def predict_upcoming_matches(
         return result, [str(exc)]
 
     model_uses_draw_context = bool(getattr(model, "include_draw_context_features_", False))
+    model_uses_fifa = bool(getattr(model, "include_fifa_ranking_features_", False))
     use_draw_context = include_draw_context_features or model_uses_draw_context
-    features = build_upcoming_feature_dataset(upcoming_df, historical_df, include_draw_context_features=use_draw_context)
+    rankings_df, ranking_warnings = load_fifa_rankings(fifa_rankings_path) if model_uses_fifa else (pd.DataFrame(), [])
+    warnings.extend(ranking_warnings)
+    features = build_upcoming_feature_dataset(
+        upcoming_df,
+        historical_df,
+        include_draw_context_features=use_draw_context,
+        include_fifa_ranking_features=model_uses_fifa,
+        fifa_rankings_df=rankings_df,
+    )
     feature_columns = getattr(model, "feature_columns_", FEATURE_COLUMNS)
     missing_columns = [column for column in feature_columns if column not in features.columns]
     if missing_columns:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from pathlib import Path
 from typing import Union
@@ -6,6 +8,7 @@ import pandas as pd
 
 from config import TRAINING_DATASET_PATH
 from draw_features import DRAW_CONTEXT_FEATURE_COLUMNS, add_draw_context_features
+from fifa_rankings import FIFA_RANKING_FEATURE_COLUMNS, add_fifa_ranking_features
 from group_state import GROUP_STATE_COLUMNS, add_group_state_features
 
 
@@ -63,11 +66,22 @@ FEATURE_COLUMNS = [
     "tournament_category",
 ]
 
+ELO_FEATURE_COLUMNS = ["home_elo_before", "away_elo_before", "elo_diff"]
 
-def get_feature_columns(include_draw_context_features: bool = False) -> list[str]:
-    if not include_draw_context_features:
-        return FEATURE_COLUMNS.copy()
-    return FEATURE_COLUMNS + DRAW_CONTEXT_FEATURE_COLUMNS
+
+def get_feature_columns(
+    include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    include_elo_features: bool = True,
+) -> list[str]:
+    columns = FEATURE_COLUMNS.copy()
+    if not include_elo_features:
+        columns = [column for column in columns if column not in ELO_FEATURE_COLUMNS]
+    if include_fifa_ranking_features:
+        columns.extend([column for column in FIFA_RANKING_FEATURE_COLUMNS if column not in columns])
+    if include_draw_context_features:
+        columns.extend([column for column in DRAW_CONTEXT_FEATURE_COLUMNS if column not in columns])
+    return columns
 
 
 def categorize_tournament(tournament: str) -> str:
@@ -221,6 +235,8 @@ def _build_training_dataset(
     df: pd.DataFrame,
     output_path: Union[str, Path] = TRAINING_DATASET_PATH,
     include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    fifa_rankings_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     matches = df.copy()
     matches["date"] = pd.to_datetime(matches["date"], errors="coerce", utc=True)
@@ -252,6 +268,8 @@ def _build_training_dataset(
         )
         _update_elo(elos, match["home_team"], match["away_team"], match["result"])
     result = pd.DataFrame(rows)
+    if include_fifa_ranking_features:
+        result, _ = add_fifa_ranking_features(result, fifa_rankings_df if fifa_rankings_df is not None else pd.DataFrame())
     if include_draw_context_features:
         result = add_draw_context_features(result)
         for column in DRAW_CONTEXT_FEATURE_COLUMNS:
@@ -270,14 +288,24 @@ def build_training_dataset(
     df: pd.DataFrame,
     output_path: Union[str, Path] = TRAINING_DATASET_PATH,
     include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    fifa_rankings_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    return _build_training_dataset(df, output_path=output_path, include_draw_context_features=include_draw_context_features)
+    return _build_training_dataset(
+        df,
+        output_path=output_path,
+        include_draw_context_features=include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+        fifa_rankings_df=fifa_rankings_df,
+    )
 
 
 def build_upcoming_feature_dataset(
     upcoming_df: pd.DataFrame,
     historical_df: pd.DataFrame,
     include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    fifa_rankings_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     historical = historical_df.copy()
     historical["date"] = pd.to_datetime(historical["date"], errors="coerce", utc=True)
@@ -309,9 +337,14 @@ def build_upcoming_feature_dataset(
         }
         combined_rows.append(row)
     result = pd.DataFrame(combined_rows)
+    if include_fifa_ranking_features:
+        result, _ = add_fifa_ranking_features(result, fifa_rankings_df if fifa_rankings_df is not None else pd.DataFrame())
     if include_draw_context_features:
         result = add_draw_context_features(result)
-    columns = get_feature_columns(include_draw_context_features)
+    columns = get_feature_columns(
+        include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+    )
     for column in columns:
         if column not in result.columns:
             result[column] = 0

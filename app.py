@@ -76,11 +76,15 @@ from config import (
     DEFAULT_ENSEMBLE_W_MARKET,
     DEFAULT_PROFILE_NAME,
     DEFAULT_PROBABILITY_SOURCE,
+    FIFA_FEATURE_COVERAGE_PATH,
+    FIFA_RANKINGS_PATH,
+    FIFA_RANKING_FEATURE_REPORT_PATH,
     HISTORICAL_RESULTS_PATH,
     LIVE_PREDICTIONS_PATH,
     LIVE_PREDICTIONS_WITH_MODEL_PATH,
     MANUAL_ODDS_PATH,
     MODEL_PATH,
+    MODEL_VARIANT_COMPARISON_PATH,
     MODEL_PREDICTIONS_PATH,
     MODEL_SOURCE,
     ODDS_API_MARKETS,
@@ -110,6 +114,7 @@ from draw_features import add_draw_context_features
 from draw_hypothesis import run_draw_hypothesis_analysis
 from ensemble import apply_ensemble_to_upcoming_matches
 from ensemble_backtest import run_ensemble_backtest_from_saved_predictions, select_best_probability_source
+from fifa_rankings import load_fifa_rankings
 from fixture_data import fixture_provenance, load_fixture_dataset, validate_fixture_dataset
 from features import build_training_dataset
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
@@ -1989,6 +1994,7 @@ def page_model_performance() -> None:
             ("Model status", "Production ready" if readiness["status"] == "production_ready" else "Demo/sample model" if readiness["status"] == "demo_model" else readiness["status"].title()),
             ("Best available", "Model" if readiness["is_usable_as_best_available"] else "Market fallback"),
             ("Feature count", str(readiness["feature_count"])),
+            ("Model variant", str(readiness.get("model_variant", "-"))),
         ]
     )
     st.info(readiness["normal_user_message"])
@@ -2047,6 +2053,7 @@ def page_model_performance() -> None:
             ("Elo features", "Yes" if readiness.get("includes_elo_features") else "Missing"),
             ("Recent form features", "Yes" if readiness.get("includes_form_features") else "Missing"),
             ("Neutral venue context", "Yes" if readiness.get("includes_neutral_venue") else "Missing"),
+            ("FIFA ranking features", "Yes" if readiness.get("includes_fifa_ranking_features") else "Not selected"),
             ("Training source", str(metadata.get("training_data_source") or readiness.get("training_data_source") or "-")),
         ]
         st.dataframe(pd.DataFrame(missing_rows, columns=["Requirement", "Status"]), width="stretch", hide_index=True)
@@ -2059,8 +2066,13 @@ def page_model_performance() -> None:
         st.caption("Detailed backtest, ensemble and draw-context diagnostics are available in Advanced / Admin.")
         comparison_df = _load_optional_csv(DRAW_FEATURE_COMPARISON_PATH)
         ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
-        if comparison_df.empty and ensemble_df.empty:
+        fifa_comparison_df = _load_optional_csv(MODEL_VARIANT_COMPARISON_PATH)
+        if comparison_df.empty and ensemble_df.empty and fifa_comparison_df.empty:
             empty_state("No advanced comparison results yet.")
+        if not fifa_comparison_df.empty:
+            st.subheader("Elo / FIFA ranking ablation")
+            st.caption("FIFA ranking and Elo are correlated team-strength signals. FIFA ranking is only used if backtesting shows it adds predictive value.")
+            st.dataframe(fifa_comparison_df, width="stretch", hide_index=True)
         if not comparison_df.empty:
             st.subheader("Historical vs draw-context")
             st.dataframe(comparison_df, width="stretch", hide_index=True)
@@ -2673,6 +2685,32 @@ def page_settings() -> None:
         st.info(odds_status["message"])
     if odds_status["last_error"]:
         st.caption(f"Status detail: {odds_status['last_error']}")
+
+    st.subheader("FIFA ranking diagnostics")
+    rankings_df, ranking_warnings = load_fifa_rankings(FIFA_RANKINGS_PATH)
+    coverage_df = _load_optional_csv(FIFA_FEATURE_COVERAGE_PATH)
+    variant_df = _load_optional_csv(MODEL_VARIANT_COMPARISON_PATH)
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Ranking file", "Found" if FIFA_RANKINGS_PATH.exists() else "Missing")
+    r2.metric("Ranking rows", str(len(rankings_df)))
+    r3.metric("Teams covered", str(rankings_df["team_normalized"].nunique()) if not rankings_df.empty else "0")
+    latest_ranking_date = "-" if rankings_df.empty else str(rankings_df["ranking_date"].max().date())
+    r4.metric("Latest ranking", latest_ranking_date)
+    st.caption(f"Ranking file: {FIFA_RANKINGS_PATH}")
+    for warning in ranking_warnings[:5]:
+        st.warning(warning)
+    if not coverage_df.empty:
+        missing_rate = (
+            coverage_df["matches_missing_ranking"].sum()
+            / (coverage_df["matches_missing_ranking"].sum() + coverage_df["matches_with_ranking"].sum())
+        )
+        st.caption(f"FIFA ranking feature missing rate in latest run: {missing_rate:.1%}")
+    if not variant_df.empty:
+        selected = variant_df[variant_df["selected"].fillna(False).astype(bool)]
+        selected_label = "-" if selected.empty else str(selected.iloc[0]["model_variant"])
+        st.caption(f"Latest ablation selected: {selected_label}")
+        with st.expander("FIFA / Elo variant comparison"):
+            st.dataframe(variant_df, width="stretch", hide_index=True)
 
     if st.button("Refresh odds now"):
         result = refresh_live_odds_and_predictions(force_refresh=True)

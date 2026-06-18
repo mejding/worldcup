@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 from datetime import datetime, timezone
@@ -12,7 +14,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from config import FEATURE_COLUMNS_PATH, MODEL_METADATA_PATH, MODEL_PATH
+from config import FEATURE_COLUMNS_PATH, FIFA_RANKINGS_PATH, MODEL_METADATA_PATH, MODEL_PATH
 from evaluation import (
     calculate_accuracy,
     calculate_log_loss,
@@ -20,6 +22,7 @@ from evaluation import (
     calculate_prediction_metrics,
 )
 from features import FEATURE_COLUMNS, build_training_dataset, get_feature_columns
+from fifa_rankings import load_fifa_rankings
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from model_readiness import PRODUCTION_MIN_TEST_ROWS, PRODUCTION_MIN_TRAINING_ROWS
 
@@ -65,16 +68,27 @@ def _build_model_pipeline(feature_columns=None) -> Pipeline:
     )
 
 
-def train_model_in_memory(training_df: pd.DataFrame, include_draw_context_features: bool = False) -> tuple[Pipeline, dict]:
+def train_model_in_memory(
+    training_df: pd.DataFrame,
+    include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    include_elo_features: bool = True,
+) -> tuple[Pipeline, dict]:
     if len(training_df) < 30:
         raise ValueError("Too little historical data to train a model. Add at least 30 matches.")
     if training_df["result"].nunique() < 3:
         raise ValueError("Training data must contain home wins, draws and away wins.")
-    feature_columns = get_feature_columns(include_draw_context_features)
+    feature_columns = get_feature_columns(
+        include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+        include_elo_features=include_elo_features,
+    )
     model = _build_model_pipeline(feature_columns)
     model.fit(training_df[feature_columns], training_df["result"])
     model.feature_columns_ = feature_columns
     model.include_draw_context_features_ = include_draw_context_features
+    model.include_fifa_ranking_features_ = include_fifa_ranking_features
+    model.include_elo_features_ = include_elo_features
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "number_of_training_rows": int(len(training_df)),
@@ -82,6 +96,8 @@ def train_model_in_memory(training_df: pd.DataFrame, include_draw_context_featur
         "date_max": str(training_df["date"].max()) if "date" in training_df.columns else None,
         "feature_columns": feature_columns,
         "include_draw_context_features": include_draw_context_features,
+        "include_fifa_ranking_features": include_fifa_ranking_features,
+        "include_elo_features": include_elo_features,
         "target_classes": list(model.named_steps["classifier"].classes_),
     }
     return model, metadata
@@ -110,6 +126,11 @@ def train_historical_model(
     test_start_date: str = None,
     model_output_path: Union[str, Path] = MODEL_PATH,
     include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    include_elo_features: bool = True,
+    fifa_ranking_metadata: dict | None = None,
+    model_variant: str = "elo_only",
+    selected_reason: str = "Selected by configured training command.",
     allow_demo_model: bool = True,
     training_data_source: str = "historical_international_results",
 ) -> dict:
@@ -122,7 +143,11 @@ def train_historical_model(
     if train_df["result"].nunique() < 3:
         raise ValueError("Training data must contain home wins, draws and away wins.")
 
-    feature_columns = get_feature_columns(include_draw_context_features)
+    feature_columns = get_feature_columns(
+        include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+        include_elo_features=include_elo_features,
+    )
     model = _build_model_pipeline(feature_columns)
 
     x_train = train_df[feature_columns]
@@ -132,6 +157,8 @@ def train_historical_model(
     model.fit(x_train, y_train)
     model.feature_columns_ = feature_columns
     model.include_draw_context_features_ = include_draw_context_features
+    model.include_fifa_ranking_features_ = include_fifa_ranking_features
+    model.include_elo_features_ = include_elo_features
     y_pred = model.predict(x_test)
     y_proba = model.predict_proba(x_test)
     labels = list(model.named_steps["classifier"].classes_)
@@ -166,7 +193,10 @@ def train_historical_model(
         "training_data_end_date": str(training_end),
         "training_year_span": float(training_year_span),
         "is_demo_model": is_demo_model,
+        "model_variant": model_variant,
+        "selected_reason": selected_reason,
         "includes_elo_features": "elo_diff" in feature_columns,
+        "includes_fifa_ranking_features": include_fifa_ranking_features,
         "includes_form_features": "home_points_per_match_last5" in feature_columns,
         "includes_tournament_features": "is_world_cup" in feature_columns,
         "includes_neutral_venue": "neutral" in feature_columns,
@@ -199,9 +229,13 @@ def train_historical_model(
         "date_max": str(training_df["date"].max()),
         "feature_columns": feature_columns,
         "include_draw_context_features": include_draw_context_features,
+        "include_fifa_ranking_features": include_fifa_ranking_features,
+        "include_elo_features": include_elo_features,
         "target_classes": labels,
         "metrics": metrics,
     }
+    if fifa_ranking_metadata:
+        metadata.update(fifa_ranking_metadata)
     MODEL_METADATA_PATH.write_text(json.dumps(metadata, indent=2))
     return metadata
 
@@ -210,6 +244,11 @@ def train_from_historical_csv(
     input_path: Union[str, Path],
     test_start_date: str = None,
     include_draw_context_features: bool = False,
+    include_fifa_ranking_features: bool = False,
+    include_elo_features: bool = True,
+    fifa_rankings_path: Union[str, Path] = FIFA_RANKINGS_PATH,
+    model_variant: str = "elo_only",
+    selected_reason: str = "Selected by configured training command.",
     allow_demo_model: bool = True,
 ) -> dict:
     raw = load_historical_results(input_path)
@@ -217,15 +256,40 @@ def train_from_historical_csv(
     if errors:
         raise ValueError("; ".join(errors))
     standardized = standardize_historical_results(raw)
-    training_df = build_training_dataset(standardized, include_draw_context_features=include_draw_context_features)
+    rankings_df, ranking_warnings = load_fifa_rankings(fifa_rankings_path)
+    ranking_metadata = {
+        "fifa_ranking_rows": int(len(rankings_df)),
+        "fifa_ranking_start_date": None if rankings_df.empty else str(rankings_df["ranking_date"].min()),
+        "fifa_ranking_end_date": None if rankings_df.empty else str(rankings_df["ranking_date"].max()),
+        "fifa_ranking_source": None if rankings_df.empty or "source" not in rankings_df.columns else "; ".join(sorted(set(rankings_df["source"].dropna().astype(str))))[:200],
+        "fifa_rank_missing_rate": None,
+    }
+    training_df = build_training_dataset(
+        standardized,
+        include_draw_context_features=include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+        fifa_rankings_df=rankings_df,
+    )
+    if include_fifa_ranking_features and "home_fifa_rank_missing" in training_df.columns:
+        ranking_metadata["fifa_rank_missing_rate"] = float(
+            pd.concat([training_df["home_fifa_rank_missing"], training_df["away_fifa_rank_missing"]])
+            .fillna(True)
+            .astype(bool)
+            .mean()
+        )
     metadata = train_historical_model(
         training_df,
         test_start_date=test_start_date,
         include_draw_context_features=include_draw_context_features,
+        include_fifa_ranking_features=include_fifa_ranking_features,
+        include_elo_features=include_elo_features,
+        fifa_ranking_metadata=ranking_metadata,
+        model_variant=model_variant,
+        selected_reason=selected_reason,
         allow_demo_model=allow_demo_model,
         training_data_source="historical_international_results",
     )
-    metadata["warnings"] = warnings
+    metadata["warnings"] = warnings + ranking_warnings
     return metadata
 
 
@@ -234,8 +298,19 @@ def main():
     parser.add_argument("--input", default="data/historical/international_results.csv")
     parser.add_argument("--test-start-date", default=None)
     parser.add_argument("--include-draw-context-features", action="store_true")
+    parser.add_argument("--include-fifa-ranking", action="store_true")
+    parser.add_argument("--no-elo", action="store_true")
+    parser.add_argument("--fifa-rankings-path", default=str(FIFA_RANKINGS_PATH))
     args = parser.parse_args()
-    metadata = train_from_historical_csv(args.input, args.test_start_date, include_draw_context_features=args.include_draw_context_features)
+    metadata = train_from_historical_csv(
+        args.input,
+        args.test_start_date,
+        include_draw_context_features=args.include_draw_context_features,
+        include_fifa_ranking_features=args.include_fifa_ranking,
+        include_elo_features=not args.no_elo,
+        fifa_rankings_path=args.fifa_rankings_path,
+        model_variant="elo_plus_fifa" if args.include_fifa_ranking and not args.no_elo else "fifa_only" if args.include_fifa_ranking else "baseline_no_strength" if args.no_elo else "elo_only",
+    )
     print(json.dumps(metadata, indent=2))
 
 

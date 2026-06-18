@@ -16,7 +16,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backtest import run_walk_forward_backtest
-from config import HISTORICAL_RESULTS_PATH
+from config import FIFA_RANKINGS_PATH, HISTORICAL_RESULTS_PATH
+from fifa_feature_ablation import run_fifa_ablation_from_files
 from historical_data import load_historical_results, standardize_historical_results, validate_historical_results
 from train_model import train_from_historical_csv
 
@@ -26,6 +27,9 @@ def main() -> None:
     parser.add_argument("--input", default=str(HISTORICAL_RESULTS_PATH), help="Historical international results CSV.")
     parser.add_argument("--test-start-date", default=None, help="Optional train/test cutoff date, e.g. 2022-01-01.")
     parser.add_argument("--include-draw-context-features", action="store_true")
+    parser.add_argument("--include-fifa-ranking", action="store_true")
+    parser.add_argument("--run-fifa-ablation", action="store_true")
+    parser.add_argument("--fifa-rankings-path", default=str(FIFA_RANKINGS_PATH))
     parser.add_argument("--run-backtest", action="store_true", help="Also run the walk-forward backtest outputs.")
     parser.add_argument("--allow-demo", action="store_true", help="Allow exporting a demo model from a small dataset.")
     parser.add_argument("--initial-train-end-date", default="2014-01-01")
@@ -41,20 +45,55 @@ def main() -> None:
             "Add the CSV for development training, then rerun this export script."
         )
 
-    metadata = train_from_historical_csv(
-        input_path,
-        test_start_date=args.test_start_date,
-        include_draw_context_features=args.include_draw_context_features,
-        allow_demo_model=args.allow_demo,
-    )
-
-    result = {"model_metadata": metadata}
-    if args.run_backtest:
+    standardized = None
+    selected = {
+        "model_variant": "elo_only",
+        "includes_elo": True,
+        "includes_fifa_ranking": args.include_fifa_ranking,
+        "selected_reason": "Selected by configured training command.",
+    }
+    ablation = None
+    if args.run_fifa_ablation:
         raw = load_historical_results(input_path)
         warnings, errors = validate_historical_results(raw)
         if errors:
             raise ValueError("; ".join(errors))
         standardized = standardize_historical_results(raw)
+        ablation = run_fifa_ablation_from_files(
+            standardized,
+            Path(args.fifa_rankings_path),
+            test_start_date=args.test_start_date,
+        )
+        selected = ablation["recommendation"]
+
+    metadata = train_from_historical_csv(
+        input_path,
+        test_start_date=args.test_start_date,
+        include_draw_context_features=args.include_draw_context_features,
+        include_fifa_ranking_features=bool(selected.get("includes_fifa_ranking")),
+        include_elo_features=bool(selected.get("includes_elo", True)),
+        fifa_rankings_path=args.fifa_rankings_path,
+        model_variant=str(selected.get("model_variant", "elo_only")),
+        selected_reason=str(selected.get("selected_reason", "Selected by configured training command.")),
+        allow_demo_model=args.allow_demo,
+    )
+
+    result = {"model_metadata": metadata}
+    if ablation is not None:
+        result["fifa_ablation"] = {
+            "selected_variant": selected.get("model_variant"),
+            "comparison_rows": len(ablation["comparison"]),
+            "warnings": ablation.get("warnings", []),
+        }
+    if args.run_backtest:
+        if standardized is None:
+            raw = load_historical_results(input_path)
+            warnings, errors = validate_historical_results(raw)
+            if errors:
+                raise ValueError("; ".join(errors))
+            standardized = standardize_historical_results(raw)
+        else:
+            warnings = []
         backtest = run_walk_forward_backtest(
             standardized,
             initial_train_end_date=args.initial_train_end_date,

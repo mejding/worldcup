@@ -1,6 +1,6 @@
 {
-  "model_version": "2026-06-14T06:18:23.673193+00:00",
-  "trained_at_utc": "2026-06-14T06:18:23.673193+00:00",
+  "model_version": "2026-06-18T21:50:06.097063+00:00",
+  "trained_at_utc": "2026-06-18T21:50:06.097063+00:00",
   "training_rows": 39526,
   "test_rows": 9882,
   "feature_count": 32,
@@ -9,7 +9,10 @@
   "training_data_end_date": "2026-06-12 00:00:00+00:00",
   "training_year_span": 153.52772073921972,
   "is_demo_model": false,
+  "model_variant": "elo_only",
+  "selected_reason": "Kept elo_only because FIFA ranking did not improve both log loss and Brier score versus Elo.",
   "includes_elo_features": true,
+  "includes_fifa_ranking_features": false,
   "includes_form_features": true,
   "includes_tournament_features": true,
   "includes_neutral_venue": true,
@@ -20,7 +23,7 @@
   "performance_log_loss": 0.8763302204713422,
   "performance_brier_score": 0.5155175600958215,
   "performance_ece": 0.014795301017008409,
-  "trained_at": "2026-06-14T06:18:23.673405+00:00",
+  "trained_at": "2026-06-18T21:50:06.097261+00:00",
   "number_of_training_rows": 39526,
   "number_of_test_rows": 9882,
   "date_min": "1872-11-30 00:00:00+00:00",
@@ -60,6 +63,8 @@
     "tournament_category"
   ],
   "include_draw_context_features": false,
+  "include_fifa_ranking_features": false,
+  "include_elo_features": true,
   "target_classes": [
     "A",
     "D",
@@ -81,5 +86,10 @@
     "away_calibration_gap": -0.01096208147251787,
     "draw_rate_actual": 0.23304998988059097,
     "draw_rate_predicted": 0.2385099440608163
-  }
+  },
+  "fifa_ranking_rows": 0,
+  "fifa_ranking_start_date": null,
+  "fifa_ranking_end_date": null,
+  "fifa_ranking_source": null,
+  "fifa_rank_missing_rate": null
 }
