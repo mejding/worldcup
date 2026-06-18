@@ -11,10 +11,13 @@ from pandas.errors import EmptyDataError
 import config as app_config
 
 
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+REFERENCE_DATA_DIR = getattr(app_config, "REFERENCE_DATA_DIR", DATA_DIR / "reference")
 FIFA_RANKINGS_PATH = getattr(
     app_config,
     "FIFA_RANKINGS_PATH",
-    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+    REFERENCE_DATA_DIR / "fifa_rankings.csv",
 )
 
 

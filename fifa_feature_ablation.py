@@ -12,17 +12,25 @@ from fifa_rankings import create_fifa_feature_coverage, load_fifa_rankings
 from train_model import _split_train_test, train_model_in_memory
 
 
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+PROCESSED_DATA_DIR = getattr(app_config, "PROCESSED_DATA_DIR", DATA_DIR / "processed")
+REPORTS_DIR = getattr(app_config, "REPORTS_DIR", DATA_DIR / "reports")
 FIFA_FEATURE_COVERAGE_PATH = getattr(
     app_config,
     "FIFA_FEATURE_COVERAGE_PATH",
-    app_config.PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
+    PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
 )
 FIFA_RANKING_FEATURE_REPORT_PATH = getattr(
     app_config,
     "FIFA_RANKING_FEATURE_REPORT_PATH",
-    app_config.REPORTS_DIR / "fifa_ranking_feature_report.md",
+    REPORTS_DIR / "fifa_ranking_feature_report.md",
 )
-MODEL_VARIANT_COMPARISON_PATH = app_config.MODEL_VARIANT_COMPARISON_PATH
+MODEL_VARIANT_COMPARISON_PATH = getattr(
+    app_config,
+    "MODEL_VARIANT_COMPARISON_PATH",
+    PROCESSED_DATA_DIR / "model_variant_comparison.csv",
+)
 
 
 MODEL_VARIANTS = {

@@ -1,4 +1,6 @@
 import html
+import os
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -72,47 +74,79 @@ from backtest_paths import (
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
 )
-DATA_MODE = app_config.DATA_MODE
-DEFAULT_ENSEMBLE_W_MARKET = app_config.DEFAULT_ENSEMBLE_W_MARKET
-DEFAULT_PROFILE_NAME = app_config.DEFAULT_PROFILE_NAME
-DEFAULT_PROBABILITY_SOURCE = app_config.DEFAULT_PROBABILITY_SOURCE
+
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+RAW_DATA_DIR = getattr(app_config, "RAW_DATA_DIR", DATA_DIR / "raw")
+REFERENCE_DATA_DIR = getattr(app_config, "REFERENCE_DATA_DIR", DATA_DIR / "reference")
+HISTORICAL_DATA_DIR = getattr(app_config, "HISTORICAL_DATA_DIR", DATA_DIR / "historical")
+MODELS_DIR = getattr(app_config, "MODELS_DIR", DATA_DIR / "models")
+REPORTS_DIR = getattr(app_config, "REPORTS_DIR", DATA_DIR / "reports")
+
+DATA_MODE = getattr(app_config, "DATA_MODE", "official")
+DEFAULT_ENSEMBLE_W_MARKET = getattr(app_config, "DEFAULT_ENSEMBLE_W_MARKET", 0.8)
+DEFAULT_PROFILE_NAME = getattr(app_config, "DEFAULT_PROFILE_NAME", "Standard")
+DEFAULT_PROBABILITY_SOURCE = getattr(app_config, "DEFAULT_PROBABILITY_SOURCE", "best_validated")
 FIFA_RANKINGS_PATH = getattr(
     app_config,
     "FIFA_RANKINGS_PATH",
-    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+    REFERENCE_DATA_DIR / "fifa_rankings.csv",
 )
 FIFA_FEATURE_COVERAGE_PATH = getattr(
     app_config,
     "FIFA_FEATURE_COVERAGE_PATH",
-    app_config.PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
+    PROCESSED_DATA_DIR / "fifa_feature_coverage.csv",
 )
 FIFA_RANKING_FEATURE_REPORT_PATH = getattr(
     app_config,
     "FIFA_RANKING_FEATURE_REPORT_PATH",
-    app_config.REPORTS_DIR / "fifa_ranking_feature_report.md",
+    REPORTS_DIR / "fifa_ranking_feature_report.md",
 )
-HISTORICAL_RESULTS_PATH = app_config.HISTORICAL_RESULTS_PATH
-LIVE_PREDICTIONS_PATH = app_config.LIVE_PREDICTIONS_PATH
-LIVE_PREDICTIONS_WITH_MODEL_PATH = app_config.LIVE_PREDICTIONS_WITH_MODEL_PATH
-MANUAL_ODDS_PATH = app_config.MANUAL_ODDS_PATH
-MODEL_PATH = app_config.MODEL_PATH
-MODEL_VARIANT_COMPARISON_PATH = app_config.MODEL_VARIANT_COMPARISON_PATH
-MODEL_PREDICTIONS_PATH = app_config.MODEL_PREDICTIONS_PATH
-MODEL_SOURCE = app_config.MODEL_SOURCE
-ODDS_API_MARKETS = app_config.ODDS_API_MARKETS
-ODDS_API_REGIONS = app_config.ODDS_API_REGIONS
-ODDS_API_SPORT_KEY = app_config.ODDS_API_SPORT_KEY
-ODDS_SNAPSHOT_PATH = app_config.ODDS_SNAPSHOT_PATH
-PREFERRED_BOOKMAKER = app_config.PREFERRED_BOOKMAKER
-PREFERRED_BOOKMAKER_NAMES = app_config.PREFERRED_BOOKMAKER_NAMES
-PROCESSED_ODDS_PATH = app_config.PROCESSED_ODDS_PATH
-REFERENCE_FIXTURES_PATH = app_config.REFERENCE_FIXTURES_PATH
-SAMPLE_PREDICTIONS_PATH = app_config.SAMPLE_PREDICTIONS_PATH
-STAKING_PROFILES = app_config.STAKING_PROFILES
-TRAINING_DATASET_PATH = app_config.TRAINING_DATASET_PATH
-get_staking_profile = app_config.get_staking_profile
-get_secret_or_env = app_config.get_secret_or_env
-validate_staking_profile = app_config.validate_staking_profile
+HISTORICAL_RESULTS_PATH = getattr(app_config, "HISTORICAL_RESULTS_PATH", HISTORICAL_DATA_DIR / "international_results.csv")
+LIVE_PREDICTIONS_PATH = getattr(app_config, "LIVE_PREDICTIONS_PATH", PROCESSED_DATA_DIR / "live_predictions.csv")
+LIVE_PREDICTIONS_WITH_MODEL_PATH = getattr(
+    app_config,
+    "LIVE_PREDICTIONS_WITH_MODEL_PATH",
+    PROCESSED_DATA_DIR / "live_predictions_with_model.csv",
+)
+MANUAL_ODDS_PATH = getattr(app_config, "MANUAL_ODDS_PATH", REFERENCE_DATA_DIR / "manual_odds.csv")
+MODEL_PATH = getattr(app_config, "MODEL_PATH", MODELS_DIR / "model.pkl")
+MODEL_VARIANT_COMPARISON_PATH = getattr(
+    app_config,
+    "MODEL_VARIANT_COMPARISON_PATH",
+    PROCESSED_DATA_DIR / "model_variant_comparison.csv",
+)
+MODEL_PREDICTIONS_PATH = getattr(app_config, "MODEL_PREDICTIONS_PATH", PROCESSED_DATA_DIR / "model_predictions.csv")
+MODEL_SOURCE = getattr(app_config, "MODEL_SOURCE", "historical_model_if_available")
+ODDS_API_MARKETS = getattr(app_config, "ODDS_API_MARKETS", "h2h")
+ODDS_API_REGIONS = getattr(app_config, "ODDS_API_REGIONS", "eu")
+ODDS_API_SPORT_KEY = getattr(app_config, "ODDS_API_SPORT_KEY", "soccer_fifa_world_cup")
+ODDS_SNAPSHOT_PATH = getattr(app_config, "ODDS_SNAPSHOT_PATH", RAW_DATA_DIR / "odds_snapshots.csv")
+PREFERRED_BOOKMAKER = getattr(app_config, "PREFERRED_BOOKMAKER", "Danske Spil")
+PREFERRED_BOOKMAKER_NAMES = getattr(
+    app_config,
+    "PREFERRED_BOOKMAKER_NAMES",
+    ["Danske Spil", "DanskeSpil", "Danske Spil A/S", "danske_spil"],
+)
+PROCESSED_ODDS_PATH = getattr(app_config, "PROCESSED_ODDS_PATH", PROCESSED_DATA_DIR / "latest_odds.csv")
+REFERENCE_FIXTURES_PATH = getattr(app_config, "REFERENCE_FIXTURES_PATH", REFERENCE_DATA_DIR / "worldcup_2026_fixtures.csv")
+SAMPLE_PREDICTIONS_PATH = getattr(app_config, "SAMPLE_PREDICTIONS_PATH", DATA_DIR / "sample_predictions.csv")
+TRAINING_DATASET_PATH = getattr(app_config, "TRAINING_DATASET_PATH", PROCESSED_DATA_DIR / "training_dataset.csv")
+STAKING_PROFILES = getattr(
+    app_config,
+    "STAKING_PROFILES",
+    {
+        "Standard": {
+            "fractional_kelly_multiplier": 0.25,
+            "max_stake_pct_of_bankroll": 0.025,
+            "min_edge_threshold": 0.025,
+            "min_stake_pct_threshold": 0.0025,
+        }
+    },
+)
+get_staking_profile = getattr(app_config, "get_staking_profile", lambda profile_name=DEFAULT_PROFILE_NAME: STAKING_PROFILES.get(profile_name, STAKING_PROFILES["Standard"]).copy())
+get_secret_or_env = getattr(app_config, "get_secret_or_env", lambda name, default=None: os.environ.get(name, default))
+validate_staking_profile = getattr(app_config, "validate_staking_profile", lambda profile: [])
 from data_loader import (
     ensure_runtime_data_files,
     get_data_freshness,

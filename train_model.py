@@ -27,14 +27,18 @@ from historical_data import load_historical_results, standardize_historical_resu
 from model_readiness import PRODUCTION_MIN_TEST_ROWS, PRODUCTION_MIN_TRAINING_ROWS
 
 
-FEATURE_COLUMNS_PATH = app_config.FEATURE_COLUMNS_PATH
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+REFERENCE_DATA_DIR = getattr(app_config, "REFERENCE_DATA_DIR", DATA_DIR / "reference")
+MODELS_DIR = getattr(app_config, "MODELS_DIR", DATA_DIR / "models")
+FEATURE_COLUMNS_PATH = getattr(app_config, "FEATURE_COLUMNS_PATH", MODELS_DIR / "feature_columns.json")
 FIFA_RANKINGS_PATH = getattr(
     app_config,
     "FIFA_RANKINGS_PATH",
-    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+    REFERENCE_DATA_DIR / "fifa_rankings.csv",
 )
-MODEL_METADATA_PATH = app_config.MODEL_METADATA_PATH
-MODEL_PATH = app_config.MODEL_PATH
+MODEL_METADATA_PATH = getattr(app_config, "MODEL_METADATA_PATH", MODELS_DIR / "model_metadata.json")
+MODEL_PATH = getattr(app_config, "MODEL_PATH", MODELS_DIR / "model.pkl")
 
 
 def _split_train_test(training_df: pd.DataFrame, test_start_date: str = None):

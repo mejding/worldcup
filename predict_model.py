@@ -9,13 +9,22 @@ from features import FEATURE_COLUMNS, build_upcoming_feature_dataset
 from fifa_rankings import load_fifa_rankings
 
 
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+REFERENCE_DATA_DIR = getattr(app_config, "REFERENCE_DATA_DIR", DATA_DIR / "reference")
+PROCESSED_DATA_DIR = getattr(app_config, "PROCESSED_DATA_DIR", DATA_DIR / "processed")
+MODELS_DIR = getattr(app_config, "MODELS_DIR", DATA_DIR / "models")
 FIFA_RANKINGS_PATH = getattr(
     app_config,
     "FIFA_RANKINGS_PATH",
-    app_config.REFERENCE_DATA_DIR / "fifa_rankings.csv",
+    REFERENCE_DATA_DIR / "fifa_rankings.csv",
 )
-LIVE_PREDICTIONS_WITH_MODEL_PATH = app_config.LIVE_PREDICTIONS_WITH_MODEL_PATH
-MODEL_PATH = app_config.MODEL_PATH
+LIVE_PREDICTIONS_WITH_MODEL_PATH = getattr(
+    app_config,
+    "LIVE_PREDICTIONS_WITH_MODEL_PATH",
+    PROCESSED_DATA_DIR / "live_predictions_with_model.csv",
+)
+MODEL_PATH = getattr(app_config, "MODEL_PATH", MODELS_DIR / "model.pkl")
 
 
 def load_trained_model(model_path: Union[str, Path] = MODEL_PATH):
