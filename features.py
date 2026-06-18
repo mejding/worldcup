@@ -20,6 +20,14 @@ DEFAULTS = {
     "elo": 1500.0,
 }
 
+UPCOMING_TEAM_ALIASES = {
+    "Cabo Verde": "Cape Verde",
+    "Congo DR": "DR Congo",
+    "Côte d'Ivoire": "Ivory Coast",
+    "IR Iran": "Iran",
+    "Türkiye": "Turkey",
+}
+
 FEATURE_COLUMNS = [
     "neutral",
     "is_major_tournament",
@@ -83,6 +91,10 @@ def categorize_tournament(tournament: str) -> str:
     if "friendly" in text:
         return "friendly"
     return "other"
+
+
+def canonical_team_name(team: str) -> str:
+    return UPCOMING_TEAM_ALIASES.get(str(team), str(team))
 
 
 def _empty_stats():
@@ -282,8 +294,8 @@ def build_upcoming_feature_dataset(
                 _update_stats(team_stats, match["home_team"], match["away_team"], match["home_score"], match["away_score"], match["result"])
                 _update_elo(elos, match["home_team"], match["away_team"], match["result"])
         feature_match = {
-            "home_team": upcoming_match["home_team"],
-            "away_team": upcoming_match["away_team"],
+            "home_team": canonical_team_name(upcoming_match["home_team"]),
+            "away_team": canonical_team_name(upcoming_match["away_team"]),
             "neutral": True,
             "tournament": "World Cup",
             "group": upcoming_match.get("group", pd.NA),

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from features import FEATURE_COLUMNS, build_training_dataset, categorize_tournament
+from features import FEATURE_COLUMNS, build_training_dataset, build_upcoming_feature_dataset, categorize_tournament
 from historical_data import standardize_historical_results
 
 
@@ -51,3 +51,35 @@ def test_tournament_categorization():
     assert categorize_tournament("World Cup qualification") == "qualifier"
     assert categorize_tournament("Friendly") == "friendly"
 
+
+def test_upcoming_team_aliases_match_historical_names():
+    historical = standardize_historical_results(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2026-01-01",
+                    "home_team": "Turkey",
+                    "away_team": "A",
+                    "home_score": 2,
+                    "away_score": 0,
+                    "tournament": "Friendly",
+                    "neutral": True,
+                }
+            ]
+        )
+    )
+    upcoming = pd.DataFrame(
+        [
+            {
+                "kickoff_time": "2026-06-20T04:00:00Z",
+                "home_team": "Türkiye",
+                "away_team": "A",
+                "group": "D",
+                "matchday": 2,
+            }
+        ]
+    )
+
+    features = build_upcoming_feature_dataset(upcoming, historical)
+
+    assert features.iloc[0]["home_matches_played_before"] == 1
