@@ -7,10 +7,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from backtest_paths import BEST_PREDICTION_SOURCE_VALIDATION_PATH
+import backtest_paths as backtest_path_config
+import config as app_config
 from calibration import calculate_class_specific_calibration, calculate_expected_calibration_error
 from ensemble import calculate_ensemble_probabilities
 
+
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+PROCESSED_DATA_DIR = getattr(app_config, "PROCESSED_DATA_DIR", DATA_DIR / "processed")
+BEST_PREDICTION_SOURCE_VALIDATION_PATH = getattr(
+    backtest_path_config,
+    "BEST_PREDICTION_SOURCE_VALIDATION_PATH",
+    PROCESSED_DATA_DIR / "best_prediction_source_validation.json",
+)
 
 LABELS = ["H", "D", "A"]
 MODEL_COLUMNS = {"home": "pred_home_prob", "draw": "pred_draw_prob", "away": "pred_away_prob"}

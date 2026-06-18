@@ -4,19 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
+import backtest_paths as backtest_path_config
+import config as app_config
 from backtest import run_walk_forward_backtest
-from backtest_paths import (
-    BEST_PREDICTION_SOURCE_VALIDATION_PATH,
-    FULL_BACKTEST_BY_FOLD_PATH,
-    FULL_BACKTEST_BY_SEGMENT_PATH,
-    FULL_BACKTEST_CALIBRATION_PATH,
-    FULL_BACKTEST_DRAW_CALIBRATION_PATH,
-    FULL_BACKTEST_MARKET_COMPARISON_PATH,
-    FULL_BACKTEST_PREDICTIONS_PATH,
-    FULL_BACKTEST_REPORT_PATH,
-    FULL_BACKTEST_SUMMARY_PATH,
-    PROCESSED_DATA_DIR,
-)
 from backtest_reports import evaluate_by_segment
 from calibration import create_confidence_calibration_bins, create_draw_calibration_table
 from validation import (
@@ -26,6 +16,33 @@ from validation import (
     save_best_prediction_source_validation,
     select_best_source_from_validation,
 )
+
+
+PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
+DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
+PROCESSED_DATA_DIR = getattr(app_config, "PROCESSED_DATA_DIR", DATA_DIR / "processed")
+REPORTS_DIR = getattr(app_config, "REPORTS_DIR", DATA_DIR / "reports")
+BEST_PREDICTION_SOURCE_VALIDATION_PATH = getattr(
+    backtest_path_config,
+    "BEST_PREDICTION_SOURCE_VALIDATION_PATH",
+    PROCESSED_DATA_DIR / "best_prediction_source_validation.json",
+)
+FULL_BACKTEST_BY_FOLD_PATH = getattr(backtest_path_config, "FULL_BACKTEST_BY_FOLD_PATH", PROCESSED_DATA_DIR / "full_backtest_by_fold.csv")
+FULL_BACKTEST_BY_SEGMENT_PATH = getattr(backtest_path_config, "FULL_BACKTEST_BY_SEGMENT_PATH", PROCESSED_DATA_DIR / "full_backtest_by_segment.csv")
+FULL_BACKTEST_CALIBRATION_PATH = getattr(backtest_path_config, "FULL_BACKTEST_CALIBRATION_PATH", PROCESSED_DATA_DIR / "full_backtest_calibration.csv")
+FULL_BACKTEST_DRAW_CALIBRATION_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_DRAW_CALIBRATION_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_draw_calibration.csv",
+)
+FULL_BACKTEST_MARKET_COMPARISON_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_MARKET_COMPARISON_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_market_comparison.csv",
+)
+FULL_BACKTEST_PREDICTIONS_PATH = getattr(backtest_path_config, "FULL_BACKTEST_PREDICTIONS_PATH", PROCESSED_DATA_DIR / "full_backtest_predictions.csv")
+FULL_BACKTEST_REPORT_PATH = getattr(backtest_path_config, "FULL_BACKTEST_REPORT_PATH", REPORTS_DIR / "full_backtest_report.md")
+FULL_BACKTEST_SUMMARY_PATH = getattr(backtest_path_config, "FULL_BACKTEST_SUMMARY_PATH", PROCESSED_DATA_DIR / "full_backtest_summary.csv")
 
 
 def _prepare_for_full_backtest(historical_matches_df: pd.DataFrame) -> pd.DataFrame:

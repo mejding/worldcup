@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from backtest_paths import (
-    ENSEMBLE_COMPARISON_PATH,
-    FULL_BACKTEST_MARKET_COMPARISON_PATH,
-    FULL_BACKTEST_PREDICTIONS_PATH,
-    FULL_BACKTEST_SUMMARY_PATH,
-)
+import backtest_paths as backtest_path_config
 import config as app_config
 from model_registry import get_active_model_status, get_latest_backtest_status, get_model_readiness, load_model_metadata
 from validation import load_best_prediction_source_validation
@@ -18,7 +13,24 @@ from validation import load_best_prediction_source_validation
 PROJECT_ROOT = getattr(app_config, "PROJECT_ROOT", Path(__file__).resolve().parent)
 DATA_DIR = getattr(app_config, "DATA_DIR", PROJECT_ROOT / "data")
 MODELS_DIR = getattr(app_config, "MODELS_DIR", DATA_DIR / "models")
+PROCESSED_DATA_DIR = getattr(app_config, "PROCESSED_DATA_DIR", DATA_DIR / "processed")
 MODEL_METADATA_PATH = getattr(app_config, "MODEL_METADATA_PATH", MODELS_DIR / "model_metadata.json")
+ENSEMBLE_COMPARISON_PATH = getattr(backtest_path_config, "ENSEMBLE_COMPARISON_PATH", PROCESSED_DATA_DIR / "ensemble_comparison.csv")
+FULL_BACKTEST_MARKET_COMPARISON_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_MARKET_COMPARISON_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_market_comparison.csv",
+)
+FULL_BACKTEST_PREDICTIONS_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_PREDICTIONS_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_predictions.csv",
+)
+FULL_BACKTEST_SUMMARY_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_SUMMARY_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_summary.csv",
+)
 
 
 def _is_missing(value) -> bool:

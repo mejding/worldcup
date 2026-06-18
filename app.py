@@ -6,6 +6,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+import backtest_paths as backtest_path_config
 import config as app_config
 from backtest import compare_baseline_vs_draw_context_model, run_walk_forward_backtest, run_world_cup_backtest
 from bankroll import load_bankroll_history, load_bankroll_state, reset_bankroll, update_bankroll
@@ -70,9 +71,6 @@ from backtest_paths import (
     ENSEMBLE_COMPARISON_PATH,
     ENSEMBLE_PREDICTIONS_PATH,
     ENSEMBLE_REPORT_PATH,
-    FULL_BACKTEST_BY_FOLD_PATH,
-    FULL_BACKTEST_MARKET_COMPARISON_PATH,
-    FULL_BACKTEST_SUMMARY_PATH,
     PROCESSED_DATA_DIR,
     WORLD_CUP_BACKTEST_PREDICTIONS_PATH,
     WORLD_CUP_BACKTEST_SUMMARY_PATH,
@@ -85,6 +83,21 @@ REFERENCE_DATA_DIR = getattr(app_config, "REFERENCE_DATA_DIR", DATA_DIR / "refer
 HISTORICAL_DATA_DIR = getattr(app_config, "HISTORICAL_DATA_DIR", DATA_DIR / "historical")
 MODELS_DIR = getattr(app_config, "MODELS_DIR", DATA_DIR / "models")
 REPORTS_DIR = getattr(app_config, "REPORTS_DIR", DATA_DIR / "reports")
+FULL_BACKTEST_BY_FOLD_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_BY_FOLD_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_by_fold.csv",
+)
+FULL_BACKTEST_MARKET_COMPARISON_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_MARKET_COMPARISON_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_market_comparison.csv",
+)
+FULL_BACKTEST_SUMMARY_PATH = getattr(
+    backtest_path_config,
+    "FULL_BACKTEST_SUMMARY_PATH",
+    PROCESSED_DATA_DIR / "full_backtest_summary.csv",
+)
 
 DATA_MODE = getattr(app_config, "DATA_MODE", "official")
 DEFAULT_ENSEMBLE_W_MARKET = getattr(app_config, "DEFAULT_ENSEMBLE_W_MARKET", 0.8)
