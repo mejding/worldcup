@@ -168,6 +168,15 @@ from live_data_pipeline import live_odds_refresh_needed, refresh_live_odds_and_p
 from match_results import add_match_results, split_active_and_archived_matches
 from model_readiness import is_production_performance_available
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status, get_model_readiness
+from model_performance_summary import (
+    build_model_quality_summary,
+    display_metric_value,
+    load_model_performance_summary,
+    metric_interpretation,
+    metric_status,
+    metric_tooltip,
+    validation_checklist,
+)
 from odds_provider import get_odds_source_status
 from odds_utils import calculate_edge
 from probability_sources import (
@@ -2025,98 +2034,187 @@ def page_model_data(df: pd.DataFrame) -> None:
         st.dataframe(fixtures, width="stretch", hide_index=True)
 
 
+def _status_icon(status: str) -> str:
+    return {"Complete": "OK", "Recommended": "Recommended", "Missing": "Missing", "Not available": "Not available"}.get(status, status)
+
+
+def _source_label(source_name: str) -> str:
+    text = str(source_name)
+    if text == "market":
+        return "Market odds"
+    if text == "historical_model":
+        return "ML model"
+    if text.startswith("ensemble"):
+        return "Ensemble / Best available"
+    return text.replace("_", " ").title()
+
+
+def _metric_card(label: str, metric_name: str, value) -> None:
+    st.metric(label, display_metric_value(metric_name, value), help=metric_tooltip(metric_name))
+    st.caption(f"{metric_status(metric_name, value)} · {metric_interpretation(metric_name, value)}")
+
+
+def _render_quality_card(quality: dict) -> None:
+    color = {
+        "green": ("#166534", "#dcfce7", "#86efac"),
+        "amber": ("#92400e", "#fef3c7", "#fcd34d"),
+        "red": ("#991b1b", "#fee2e2", "#fecaca"),
+        "gray": ("#374151", "#f3f4f6", "#d1d5db"),
+    }.get(quality["status_color"], ("#374151", "#f3f4f6", "#d1d5db"))
+    st.markdown(
+        f"""
+        <div style="border:1px solid {color[2]}; background:{color[1]}; border-radius:8px; padding:16px 18px; margin: 4px 0 14px 0;">
+          <div style="font-size:0.82rem; color:{color[0]}; font-weight:700; text-transform:uppercase;">Model quality: {html.escape(quality['quality_label'])}</div>
+          <div style="font-size:1.2rem; color:#111827; font-weight:700; margin-top:4px;">{html.escape(quality['headline'])}</div>
+          <div style="color:#374151; margin-top:6px;">{html.escape(quality['summary_text'])}</div>
+          <div style="color:#111827; margin-top:10px; font-weight:600;">{html.escape(quality['user_conclusion'])}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_market_comparison(comparison_df: pd.DataFrame, best_source: Optional[dict]) -> None:
+    st.subheader("Model vs market")
+    if comparison_df is None or comparison_df.empty:
+        empty_state("Market comparison has not been calculated yet.")
+        st.write(
+            "The current metrics show how the model performed on historical matches, but they do not yet tell "
+            "whether it beats bookmaker-implied probabilities."
+        )
+        st.info("Recommended action: run market comparison / full backtest in Advanced / Admin.")
+        if st.button("Go to Advanced / Admin", key="model_perf_go_admin_market"):
+            st.session_state.current_page = "Advanced / Admin"
+            st.session_state.page = "Advanced / Admin"
+            st.rerun()
+        return
+
+    rows = []
+    for _, row in comparison_df.iterrows():
+        source = str(row.get("source_name", ""))
+        rows.append(
+            {
+                "Source": _source_label(source),
+                "Accuracy": display_metric_value("accuracy", row.get("accuracy")),
+                "Log Loss": display_metric_value("log_loss", row.get("log_loss")),
+                "Brier": display_metric_value("brier_score", row.get("brier_score")),
+                "Calibration": display_metric_value("ece", row.get("ece")),
+                "Matches": display_metric_value("match_count", row.get("match_count")),
+                "Best": "Yes" if best_source and source == best_source.get("source_name") else "",
+            }
+        )
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    if best_source:
+        st.success(f"The app currently uses {best_source['label']} because it performed best on probability quality metrics.")
+
+
+def _render_betting_implication(summary: dict, quality: dict) -> None:
+    st.subheader("What this means for betting")
+    status = summary.get("model_status")
+    if status == "demo_model":
+        st.write("The model is not suitable for real predictions. The app falls back to market odds.")
+        return
+    if status != "production_ready":
+        st.write("ML predictions are unavailable, so recommendations should be treated as market-based only.")
+        return
+    if summary.get("market_comparison_available"):
+        st.write(
+            "The app uses the prediction source that performed best in validation. Value bets are calculated by "
+            "comparing that probability against available odds."
+        )
+    else:
+        st.write(
+            "The model appears strong on historical holdout data, but we have not yet confirmed whether it beats market odds. "
+            "Betting recommendations should therefore remain conservative and use market odds as part of the best available prediction source."
+        )
+    if not summary.get("calibration_available"):
+        st.warning("Because calibration is not yet calculated, stake suggestions should be interpreted conservatively.")
+    st.caption(quality["recommended_next_action"])
+
+
 def page_model_performance() -> None:
     st.title("Model Performance")
-    st.caption("A simple quality summary for the prediction engine.")
+    st.caption("Can I trust the model?")
+
     model_status = get_active_model_status()
     readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     backtest_status = get_latest_backtest_status()
-
-    st.subheader("Best prediction source")
-    metric_row(
-        [
-            ("Prediction source", "Best available"),
-            ("Model status", "Production ready" if readiness["status"] == "production_ready" else "Demo/sample model" if readiness["status"] == "demo_model" else readiness["status"].title()),
-            ("Best available", "Model" if readiness["is_usable_as_best_available"] else "Market fallback"),
-            ("Feature count", str(readiness["feature_count"])),
-            ("Model variant", str(readiness.get("model_variant", "-"))),
-        ]
+    ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
+    performance = load_model_performance_summary(
+        readiness=readiness,
+        model_status=model_status,
+        backtest_status=backtest_status,
+        comparison_df=ensemble_df,
     )
-    st.info(readiness["normal_user_message"])
-    if readiness["status"] == "demo_model":
-        st.warning("This model is not trained on enough historical data for reliable predictions.")
-    st.caption(
-        "The app automatically uses the best available prediction source. "
-        "If the pre-trained model is unavailable, it falls back to market probabilities."
-    )
+    quality = build_model_quality_summary(readiness.get("metadata", {}), performance, ensemble_df)
 
-    st.subheader("Performance")
-    if is_production_performance_available(readiness, backtest_status):
-        metric_row(
-            [
-                ("Accuracy", "-" if pd.isna(backtest_status["overall_accuracy"]) else format_percentage(backtest_status["overall_accuracy"])),
-                ("Log loss", "-" if pd.isna(backtest_status["overall_log_loss"]) else f"{backtest_status['overall_log_loss']:.3f}"),
-                ("Brier score", "-" if pd.isna(backtest_status["overall_brier_score"]) else f"{backtest_status['overall_brier_score']:.3f}"),
-                ("Calibration error", "-" if pd.isna(backtest_status["overall_ece"]) else f"{backtest_status['overall_ece']:.3f}"),
-                ("Matches", str(backtest_status["prediction_count"])),
-            ]
-        )
-        st.caption("Performance is calculated on historical matches where the result is known.")
-    elif readiness["status"] == "production_ready" and model_status["accuracy"] is not None:
-        metric_row(
-            [
-                ("Accuracy", format_percentage(model_status["accuracy"])),
-                ("Log loss", f"{model_status['log_loss']:.3f}" if model_status["log_loss"] is not None else "-"),
-                ("Brier score", f"{model_status['brier_score']:.3f}" if model_status["brier_score"] is not None else "-"),
-                ("Calibration error", "-"),
-                ("Matches", str(model_status["number_of_test_rows"])),
-            ]
-        )
-        st.caption("Showing bundled model holdout metrics. Full backtest results have not been calculated yet.")
-    elif readiness["status"] == "demo_model":
-        metadata = readiness.get("metadata", {})
-        metric_row(
-            [
-                ("Training rows", str(readiness["training_rows"])),
-                ("Test rows", str(readiness["test_rows"])),
-                ("Years covered", f"{readiness.get('training_year_span', 0):.1f}"),
-                ("Feature count", str(readiness["feature_count"])),
-                ("Model status", "Not production-ready"),
-            ]
-        )
-        st.warning(
-            "Performance metrics are hidden because the current model is a demo artifact, not a production model "
-            "trained on previous tournaments, qualifiers, Elo/form and tournament context."
-        )
-        missing_rows = [
-            ("Historical CSV", "Found" if readiness["historical_csv_exists"] else "Missing"),
-            ("Production training rows", f"{readiness['training_rows']} / 1000+"),
-            ("Production test rows", f"{readiness['test_rows']} / 200+"),
-            ("Training years", f"{readiness.get('training_year_span', 0):.1f} / 8+"),
-            ("Qualifiers in training data", "Yes" if readiness.get("includes_qualifiers") else "Missing"),
-            ("World Cup/major tournaments", "Yes" if readiness.get("includes_world_cup_or_major_tournaments") else "Missing"),
-            ("Elo features", "Yes" if readiness.get("includes_elo_features") else "Missing"),
-            ("Recent form features", "Yes" if readiness.get("includes_form_features") else "Missing"),
-            ("Neutral venue context", "Yes" if readiness.get("includes_neutral_venue") else "Missing"),
-            ("FIFA ranking features", "Yes" if readiness.get("includes_fifa_ranking_features") else "Not selected"),
-            ("Training source", str(metadata.get("training_data_source") or readiness.get("training_data_source") or "-")),
-        ]
-        st.dataframe(pd.DataFrame(missing_rows, columns=["Requirement", "Status"]), width="stretch", hide_index=True)
-        st.caption("Developer/admin action: add a real historical international dataset and retrain/export the model.")
+    _render_quality_card(quality)
+
+    st.subheader("Prediction quality metrics")
+    metric_columns = st.columns(5)
+    metrics = [
+        ("Accuracy", "accuracy", performance.get("accuracy")),
+        ("Log Loss", "log_loss", performance.get("log_loss")),
+        ("Brier Score", "brier_score", performance.get("brier_score")),
+        ("Calibration", "ece", performance.get("ece")),
+        ("Matches", "match_count", performance.get("match_count")),
+    ]
+    for column, (label, metric_name, value) in zip(metric_columns, metrics):
+        with column:
+            _metric_card(label, metric_name, value)
+    if performance["metrics_source"] == "holdout_metadata":
+        st.caption("These results come from the pre-trained model's holdout test set.")
+        st.caption("Holdout metrics are useful, but full backtest and market comparison are needed to fully validate betting performance.")
+    elif performance["metrics_source"] == "full_backtest":
+        st.caption("These results come from the full walk-forward backtest.")
     else:
-        empty_state("Model performance has not been calculated yet.")
-        st.caption("Performance is calculated on historical matches where the result is known.")
+        st.info("Model performance has not been calculated yet.")
 
-    with st.expander("Advanced model comparison"):
-        st.caption("Detailed backtest, ensemble and draw-context diagnostics are available in Advanced / Admin.")
+    _render_market_comparison(performance["comparison_df"], performance["best_comparison_source"])
+
+    st.subheader("Validation status")
+    checklist = validation_checklist(performance)
+    checklist_df = pd.DataFrame([{**item, "Status": _status_icon(item["Status"])} for item in checklist])
+    st.dataframe(checklist_df, width="stretch", hide_index=True)
+    if performance["missing_items"]:
+        st.warning("The model is usable as a baseline, but full validation is not complete.")
+    if not performance["full_backtest_available"]:
+        st.info("Full walk-forward backtest has not been run yet.")
+
+    _render_betting_implication(performance, quality)
+
+    with st.expander("Advanced model details"):
+        st.caption("Technical details and diagnostics are kept here so the main page stays readable.")
+        metric_row(
+            [
+                ("Prediction source", "Best available prediction"),
+                ("Currently using", "ML model" if readiness["is_usable_as_best_available"] else "Market fallback"),
+                ("Model version", str(readiness.get("model_version") or "Not available")),
+                ("Feature count", str(readiness.get("feature_count") or "Not available")),
+                ("Training rows", str(readiness.get("training_rows") or "Not available")),
+                ("Test rows", str(readiness.get("test_rows") or "Not available")),
+            ]
+        )
+        st.write(
+            f"Training period: {readiness.get('training_data_start_date', 'Not available')} "
+            f"to {readiness.get('training_data_end_date', 'Not available')}"
+        )
+        st.write(
+            "Feature groups: "
+            f"Elo={'yes' if readiness.get('includes_elo_features') else 'no'}, "
+            f"FIFA ranking={'yes' if readiness.get('includes_fifa_ranking_features') else 'no'}, "
+            f"form={'yes' if readiness.get('includes_form_features') else 'no'}, "
+            f"tournament context={'yes' if readiness.get('includes_tournament_features') else 'no'}, "
+            f"neutral venue={'yes' if readiness.get('includes_neutral_venue') else 'no'}."
+        )
+        if readiness.get("warnings"):
+            st.write("Readiness warnings")
+            for warning in readiness["warnings"]:
+                st.warning(warning)
         comparison_df = _load_optional_csv(DRAW_FEATURE_COMPARISON_PATH)
-        ensemble_df = _load_optional_csv(ENSEMBLE_COMPARISON_PATH)
         fifa_comparison_df = _load_optional_csv(MODEL_VARIANT_COMPARISON_PATH)
-        if comparison_df.empty and ensemble_df.empty and fifa_comparison_df.empty:
-            empty_state("No advanced comparison results yet.")
         if not fifa_comparison_df.empty:
             st.subheader("Elo / FIFA ranking ablation")
-            st.caption("FIFA ranking and Elo are correlated team-strength signals. FIFA ranking is only used if backtesting shows it adds predictive value.")
             st.dataframe(fifa_comparison_df, width="stretch", hide_index=True)
         if not comparison_df.empty:
             st.subheader("Historical vs draw-context")
@@ -2124,6 +2222,8 @@ def page_model_performance() -> None:
         if not ensemble_df.empty:
             st.subheader("Market/model/ensemble")
             st.dataframe(ensemble_df, width="stretch", hide_index=True)
+        with st.expander("Raw model metadata"):
+            st.json(readiness.get("metadata", {}))
 
 
 def page_advanced_admin(df: pd.DataFrame) -> None:

@@ -1,8 +1,62 @@
 import pandas as pd
 
 
+def calculate_expected_calibration_error(y_true, y_pred_probs, n_bins: int = 10, labels=None):
+    labels = labels or ["H", "D", "A"]
+    if y_true is None or y_pred_probs is None:
+        return None
+    df = _probability_frame(y_true, y_pred_probs, labels)
+    if df.empty:
+        return None
+    probabilities = df[labels].apply(pd.to_numeric, errors="coerce")
+    valid = probabilities.notna().all(axis=1) & df["actual"].notna()
+    if not valid.any():
+        return None
+    probabilities = probabilities.loc[valid]
+    actual = df.loc[valid, "actual"]
+    confidence = probabilities.max(axis=1)
+    predicted = probabilities.idxmax(axis=1)
+    correct = predicted.eq(actual).astype(float)
+    edges = [i / n_bins for i in range(n_bins + 1)]
+    ece = 0.0
+    total = len(probabilities)
+    for index, lower in enumerate(edges[:-1]):
+        upper = edges[index + 1]
+        mask = (confidence >= lower) & (confidence <= upper if index == n_bins - 1 else confidence < upper)
+        if not mask.any():
+            continue
+        weight = float(mask.sum() / total)
+        ece += weight * abs(float(confidence[mask].mean()) - float(correct[mask].mean()))
+    return float(ece)
+
+
+def calculate_class_specific_calibration(y_true, y_pred_probs, labels=None) -> dict:
+    labels = labels or ["H", "D", "A"]
+    if y_true is None or y_pred_probs is None:
+        return {}
+    df = _probability_frame(y_true, y_pred_probs, labels)
+    if df.empty:
+        return {}
+    result = {}
+    for label in labels:
+        probability = pd.to_numeric(df[label], errors="coerce")
+        valid = probability.notna() & df["actual"].notna()
+        if not valid.any():
+            result[label] = None
+            continue
+        result[label] = {
+            "avg_predicted_probability": float(probability[valid].mean()),
+            "actual_rate": float((df.loc[valid, "actual"] == label).mean()),
+            "calibration_gap": float(probability[valid].mean() - (df.loc[valid, "actual"] == label).mean()),
+        }
+    return result
+
+
 def _probability_frame(y_true, y_proba, labels):
-    df = pd.DataFrame(y_proba, columns=labels)
+    try:
+        df = pd.DataFrame(y_proba, columns=labels)
+    except ValueError:
+        return pd.DataFrame(columns=labels + ["actual"])
     df["actual"] = list(y_true)
     return df
 

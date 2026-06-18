@@ -1,6 +1,11 @@
 import pytest
 
-from calibration import create_confidence_calibration_bins, create_draw_calibration_table
+from calibration import (
+    calculate_class_specific_calibration,
+    calculate_expected_calibration_error,
+    create_confidence_calibration_bins,
+    create_draw_calibration_table,
+)
 
 
 def test_confidence_calibration_bins_output_columns():
@@ -32,3 +37,27 @@ def test_calibration_gap_calculation():
     row = df[df["bin_label"] == "0.20-0.25"].iloc[0]
 
     assert row["calibration_gap"] == pytest.approx(0.225 - 0.5)
+
+
+def test_expected_calibration_error_multiclass_simple_case():
+    ece = calculate_expected_calibration_error(
+        ["H", "A"],
+        [[0.8, 0.1, 0.1], [0.2, 0.2, 0.6]],
+        n_bins=2,
+    )
+
+    assert ece == pytest.approx(0.3)
+
+
+def test_expected_calibration_error_missing_predictions_returns_none():
+    assert calculate_expected_calibration_error([], [], n_bins=5) is None
+
+
+def test_class_specific_calibration_handles_draw_class():
+    result = calculate_class_specific_calibration(
+        ["D", "H"],
+        [[0.2, 0.6, 0.2], [0.7, 0.2, 0.1]],
+    )
+
+    assert "D" in result
+    assert result["D"]["actual_rate"] == pytest.approx(0.5)
