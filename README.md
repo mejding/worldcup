@@ -378,8 +378,17 @@ Command-line training is also available:
 
 ```bash
 python scripts/import_historical_results.py
+python scripts/import_fifa_rankings.py
 python scripts/train_and_export_model.py --input data/historical/international_results.csv
 ```
+
+FIFA ranking snapshots are stored in `data/reference/fifa_rankings.csv`. The refresh script reads the official FIFA men's ranking schedules and ranking snapshots from FIFA's own public API, then writes one row per team per ranking date. The training pipeline can test FIFA ranking features with:
+
+```bash
+python scripts/train_and_export_model.py --run-fifa-ablation
+```
+
+The ablation compares baseline, Elo-only, FIFA-only and Elo+FIFA variants. FIFA ranking features are only selected for the bundled model when they improve probability metrics against the Elo baseline.
 
 For deliberately small development runs, pass `--allow-demo`. Demo exports are marked with `is_demo_model = true` and are not treated as production-ready.
 

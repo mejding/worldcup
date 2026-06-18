@@ -1,6 +1,6 @@
 {
-  "model_version": "2026-06-18T21:50:06.097063+00:00",
-  "trained_at_utc": "2026-06-18T21:50:06.097063+00:00",
+  "model_version": "2026-06-18T22:05:30.990654+00:00",
+  "trained_at_utc": "2026-06-18T22:05:30.990654+00:00",
   "training_rows": 39526,
   "test_rows": 9882,
   "feature_count": 32,
@@ -23,7 +23,7 @@
   "performance_log_loss": 0.8763302204713422,
   "performance_brier_score": 0.5155175600958215,
   "performance_ece": 0.014795301017008409,
-  "trained_at": "2026-06-18T21:50:06.097261+00:00",
+  "trained_at": "2026-06-18T22:05:30.990873+00:00",
   "number_of_training_rows": 39526,
   "number_of_test_rows": 9882,
   "date_min": "1872-11-30 00:00:00+00:00",
@@ -87,9 +87,9 @@
     "draw_rate_actual": 0.23304998988059097,
     "draw_rate_predicted": 0.2385099440608163
   },
-  "fifa_ranking_rows": 0,
-  "fifa_ranking_start_date": null,
-  "fifa_ranking_end_date": null,
-  "fifa_ranking_source": null,
+  "fifa_ranking_rows": 70405,
+  "fifa_ranking_start_date": "1992-12-31 00:00:00+00:00",
+  "fifa_ranking_end_date": "2026-06-11 00:00:00+00:00",
+  "fifa_ranking_source": "FIFA official ranking API",
   "fifa_rank_missing_rate": null
 }

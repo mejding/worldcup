@@ -142,12 +142,36 @@ def add_fifa_ranking_features(matches_df: pd.DataFrame, rankings_df: pd.DataFram
     neutral_rank, neutral_points = _neutral_rankings(rankings_df)
     home_values = []
     away_values = []
+    rankings_by_team = {}
+    if rankings_df is not None and not rankings_df.empty:
+        ranking_lookup = rankings_df.copy()
+        ranking_lookup["ranking_date"] = pd.to_datetime(ranking_lookup["ranking_date"], errors="coerce", utc=True)
+        ranking_lookup = ranking_lookup.dropna(subset=["ranking_date", "team_normalized", "fifa_rank", "fifa_points"])
+        for team_key, team_df in ranking_lookup.sort_values("ranking_date").groupby("team_normalized", sort=False):
+            rankings_by_team[team_key] = team_df.reset_index(drop=True)
+
+    def lookup(team, match_date):
+        timestamp = pd.to_datetime(match_date, errors="coerce", utc=True)
+        if pd.isna(timestamp):
+            return None
+        team_rows = rankings_by_team.get(normalize_team_name(team))
+        if team_rows is None or team_rows.empty:
+            return None
+        position = team_rows["ranking_date"].searchsorted(timestamp, side="right") - 1
+        if position < 0:
+            return None
+        latest = team_rows.iloc[int(position)]
+        return {
+            "fifa_rank": float(latest["fifa_rank"]),
+            "fifa_points": float(latest["fifa_points"]),
+            "ranking_date": latest["ranking_date"],
+        }
 
     date_column = "date" if "date" in result.columns else "kickoff_time"
     for _, row in result.iterrows():
         match_date = row.get(date_column)
-        home = get_latest_fifa_ranking_before_date(rankings_df, row.get("home_team"), match_date)
-        away = get_latest_fifa_ranking_before_date(rankings_df, row.get("away_team"), match_date)
+        home = lookup(row.get("home_team"), match_date)
+        away = lookup(row.get("away_team"), match_date)
         if home is None:
             warnings.append(f"Missing FIFA ranking for {row.get('home_team')} before {match_date}.")
             home = {"fifa_rank": neutral_rank, "fifa_points": neutral_points, "ranking_date": pd.NaT, "missing": True}
