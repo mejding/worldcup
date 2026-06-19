@@ -99,6 +99,7 @@ FULL_BACKTEST_SUMMARY_PATH = getattr(
     PROCESSED_DATA_DIR / "full_backtest_summary.csv",
 )
 
+BANKROLL_STATE_PATH = getattr(app_config, "BANKROLL_STATE_PATH", DATA_DIR / "bankroll_state.json")
 DATA_MODE = getattr(app_config, "DATA_MODE", "official")
 DEFAULT_ENSEMBLE_W_MARKET = getattr(app_config, "DEFAULT_ENSEMBLE_W_MARKET", 0.8)
 DEFAULT_PROFILE_NAME = getattr(app_config, "DEFAULT_PROFILE_NAME", "Standard")
@@ -126,7 +127,9 @@ LIVE_PREDICTIONS_WITH_MODEL_PATH = getattr(
     PROCESSED_DATA_DIR / "live_predictions_with_model.csv",
 )
 MANUAL_ODDS_PATH = getattr(app_config, "MANUAL_ODDS_PATH", REFERENCE_DATA_DIR / "manual_odds.csv")
+MATCH_RESULTS_PATH = getattr(app_config, "MATCH_RESULTS_PATH", REFERENCE_DATA_DIR / "match_results.csv")
 MODEL_PATH = getattr(app_config, "MODEL_PATH", MODELS_DIR / "model.pkl")
+MODEL_METADATA_PATH = getattr(app_config, "MODEL_METADATA_PATH", MODELS_DIR / "model_metadata.json")
 MODEL_VARIANT_COMPARISON_PATH = getattr(
     app_config,
     "MODEL_VARIANT_COMPARISON_PATH",
@@ -305,12 +308,53 @@ def rebuild_model_from_historical_data(include_draw_context_features: bool = Fal
     )
 
 
+def _path_signature(path: Path) -> tuple[str, bool, float, int]:
+    path = Path(path)
+    if not path.exists():
+        return (str(path), False, 0.0, 0)
+    stat = path.stat()
+    return (str(path), True, stat.st_mtime, stat.st_size)
+
+
+def _prediction_prepare_signature() -> tuple:
+    return (
+        st.session_state.data_mode,
+        st.session_state.model_source,
+        _path_signature(MODEL_PATH),
+        _path_signature(MODEL_METADATA_PATH),
+        _path_signature(MODEL_PREDICTIONS_PATH),
+        _path_signature(LIVE_PREDICTIONS_PATH),
+        _path_signature(LIVE_PREDICTIONS_WITH_MODEL_PATH),
+        _path_signature(REFERENCE_FIXTURES_PATH),
+        _path_signature(SAMPLE_PREDICTIONS_PATH),
+    )
+
+
+def _prediction_data_signature() -> tuple:
+    return (
+        _path_signature(MODEL_PATH),
+        _path_signature(MODEL_METADATA_PATH),
+        _path_signature(MODEL_PREDICTIONS_PATH),
+        _path_signature(LIVE_PREDICTIONS_PATH),
+        _path_signature(LIVE_PREDICTIONS_WITH_MODEL_PATH),
+        _path_signature(ENSEMBLE_PREDICTIONS_PATH),
+        _path_signature(REFERENCE_FIXTURES_PATH),
+        _path_signature(SAMPLE_PREDICTIONS_PATH),
+        _path_signature(MATCH_RESULTS_PATH),
+        _path_signature(BANKROLL_STATE_PATH),
+    )
+
+
 def prepare_best_available_predictions() -> list[str]:
+    signature = _prediction_prepare_signature()
+    if st.session_state.get("_prediction_prepare_signature") == signature:
+        return []
     messages = []
     model_status = get_active_model_status()
     readiness = get_model_readiness(predictions_exist=MODEL_PREDICTIONS_PATH.exists() or LIVE_PREDICTIONS_WITH_MODEL_PATH.exists())
     if not readiness["is_usable_as_best_available"] and st.session_state.data_mode != "sample":
         st.session_state.model_source = "market_only"
+        st.session_state["_prediction_prepare_signature"] = signature
         messages.append(readiness["normal_user_message"])
         return messages
     if not model_status["artifacts_ready"]:
@@ -323,6 +367,7 @@ def prepare_best_available_predictions() -> list[str]:
             model_status = get_active_model_status()
         except Exception as exc:
             st.session_state.model_source = "market_only"
+            st.session_state["_prediction_prepare_signature"] = signature
             messages.append(
                 "Predictions are currently based on market odds because the pre-trained model is unavailable "
                 f"and could not be rebuilt from historical data. Details: {exc}"
@@ -401,6 +446,7 @@ def prepare_best_available_predictions() -> list[str]:
     except Exception as exc:
         st.session_state.model_source = "market_only"
         messages.append(f"Pre-trained model could not be applied. Using market-implied probabilities as fallback. Details: {exc}")
+    st.session_state["_prediction_prepare_signature"] = _prediction_prepare_signature()
     return messages
 
 
@@ -449,31 +495,37 @@ def auto_refresh_live_odds_on_reload() -> list[str]:
     return []
 
 
-def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
-    startup_messages = auto_refresh_live_odds_on_reload()
-    startup_messages.extend(prepare_best_available_predictions())
+@st.cache_data(show_spinner=False, ttl=300)
+def _load_enriched_predictions_cached(
+    data_mode: str,
+    model_source: str,
+    probability_source: str,
+    current_bankroll: float,
+    staking_profile_items: tuple,
+    preferred_bookmaker_mode: str,
+    data_signature: tuple,
+) -> tuple[pd.DataFrame, list[str], list[str], str, str]:
     try:
         predictions, mode_warnings, actual_mode = load_predictions_by_mode(
-            st.session_state.data_mode,
-            model_source=st.session_state.model_source,
+            data_mode,
+            model_source=model_source,
         )
         predictions = add_danish_kickoff_column(predictions)
-        st.session_state.active_data_mode = actual_mode
-        st.session_state.active_model_source = (
+        active_model_source = (
             "market_only"
-            if st.session_state.model_source == "market_only"
+            if model_source == "market_only"
             or any("market probabilities" in warning.lower() for warning in mode_warnings)
             else "historical_model"
         )
     except FileNotFoundError as exc:
-        return pd.DataFrame(), [], [str(exc)]
+        return pd.DataFrame(), [], [str(exc)], data_mode, model_source
     except pd.errors.EmptyDataError:
-        return pd.DataFrame(), [], ["Sample predictions file is empty or malformed."]
+        return pd.DataFrame(), [], ["Sample predictions file is empty or malformed."], data_mode, model_source
 
     warnings, errors = validate_predictions(predictions)
-    warnings = startup_messages + mode_warnings + warnings
+    warnings = mode_warnings + warnings
     if errors:
-        return predictions, warnings, errors
+        return predictions, warnings, errors, actual_mode, active_model_source
     if ENSEMBLE_PREDICTIONS_PATH.exists() and ENSEMBLE_PREDICTIONS_PATH.stat().st_size > 0:
         try:
             ensemble_df = pd.read_csv(ENSEMBLE_PREDICTIONS_PATH)
@@ -493,19 +545,36 @@ def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
         except Exception:
             warnings.append("Could not load saved ensemble predictions.")
     try:
-        predictions = apply_probability_source(predictions, st.session_state.probability_source)
+        predictions = apply_probability_source(predictions, probability_source)
         warnings.extend(predictions.attrs.get("warnings", []))
     except ValueError as exc:
-        return predictions, warnings, [str(exc)]
+        return predictions, warnings, [str(exc)], actual_mode, active_model_source
     predictions = add_match_results(predictions)
-    bankroll = load_bankroll_state()["current_bankroll"]
     enriched = add_recommendations(
         predictions,
-        bankroll,
-        current_profile(),
-        preferred_bookmaker_mode=st.session_state.preferred_bookmaker_mode,
+        current_bankroll,
+        dict(staking_profile_items),
+        preferred_bookmaker_mode=preferred_bookmaker_mode,
     )
-    return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors
+    return enriched.rename(columns={"status": "recommendation_status"}), warnings, errors, actual_mode, active_model_source
+
+
+def load_enriched_predictions() -> tuple[pd.DataFrame, list[str], list[str]]:
+    startup_messages = auto_refresh_live_odds_on_reload()
+    startup_messages.extend(prepare_best_available_predictions())
+    bankroll = load_bankroll_state()["current_bankroll"]
+    df, warnings, errors, active_data_mode, active_model_source = _load_enriched_predictions_cached(
+        st.session_state.data_mode,
+        st.session_state.model_source,
+        st.session_state.probability_source,
+        float(bankroll),
+        tuple(sorted(current_profile().items())),
+        st.session_state.preferred_bookmaker_mode,
+        _prediction_data_signature(),
+    )
+    st.session_state.active_data_mode = active_data_mode
+    st.session_state.active_model_source = active_model_source
+    return df, startup_messages + warnings, errors
 
 
 def probability_for_outcome(row, outcome: str) -> float:
