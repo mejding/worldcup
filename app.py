@@ -1358,6 +1358,33 @@ def odds_availability_message(df: pd.DataFrame) -> Optional[str]:
     return "Live predictions er indlæst, men ingen 1X2-odds matchede fixtures. Tjek odds-providerens sport key/regions og bookmaker coverage."
 
 
+def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool = False) -> None:
+    if not st.button(button_label, key=key, use_container_width=use_container_width):
+        return
+    try:
+        with st.spinner("Refreshing odds..."):
+            result = refresh_live_odds_and_predictions(force_refresh=True)
+        for warning in result.get("warnings", []):
+            if "Ignored" in str(warning) and "provider odds event" in str(warning):
+                st.info(warning)
+            else:
+                st.warning(warning)
+        if result.get("last_error"):
+            st.warning(result["last_error"])
+        if result.get("matches_with_odds", 0) > 0:
+            st.session_state.data_mode = "live"
+        st.session_state.pop("_prediction_prepare_signature", None)
+        _load_enriched_predictions_cached.clear()
+        st.session_state["last_odds_refresh_message"] = (
+            f"Odds refresh completed via {result['active_odds_source']}. "
+            f"{result['matches_with_odds']} / {result['matches_total']} matches have odds."
+        )
+        st.session_state["last_odds_refresh_result"] = result
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Could not refresh odds: {exc}")
+
+
 def odds_provenance_text(df: pd.DataFrame) -> str:
     if st.session_state.active_data_mode == "sample":
         return "Odds: Sample/demo odds - not real bookmaker odds."
@@ -1434,12 +1461,19 @@ def page_overview(df: pd.DataFrame) -> None:
     )
     st.caption(f"Live data · {len(active_df)} upcoming matches · Preferred bookmaker: {preferred_bookmaker_label()}")
     st.caption(odds_provenance_text(active_df))
-    if not archived_df.empty:
+    refresh_message = st.session_state.pop("last_odds_refresh_message", None)
+    if refresh_message:
+        st.success(refresh_message)
+    archive_col, refresh_col = st.columns([1, 1])
+    with archive_col:
         st.caption(f"{len(archived_df)} afviklede kampe er flyttet til Match Archive.")
-        if st.button("View archive", key="overview_view_archive"):
+        if st.button("View archive", key="overview_view_archive", disabled=archived_df.empty, use_container_width=True):
             st.session_state.page = "Match Archive"
             st.session_state.current_page = "Match Archive"
             st.rerun()
+    with refresh_col:
+        st.caption("Opdater odds og live predictions.")
+        refresh_odds_from_ui("Refresh odds", key="overview_refresh_odds", use_container_width=True)
     if st.session_state.active_data_mode == "sample":
         st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
     if active_df.empty:
@@ -2510,16 +2544,7 @@ def page_user_settings() -> None:
     )
     if odds_status["active_odds_source"] == "missing":
         st.warning("Live odds are missing. Add API key or manual odds.")
-    if st.button("Refresh odds"):
-        try:
-            with st.spinner("Refreshing odds..."):
-                result = refresh_live_odds_and_predictions(force_refresh=True)
-            for warning in result.get("warnings", []):
-                st.warning(warning)
-            st.success("Odds refreshed.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"Could not refresh odds: {exc}")
+    refresh_odds_from_ui("Refresh odds", key="settings_refresh_odds")
 
     st.subheader("Display")
     st.caption("Live data uses official fixtures, updated odds and best available predictions. Demo mode is available only in Advanced / Admin.")
@@ -3096,22 +3121,10 @@ def page_settings() -> None:
         with st.expander("FIFA / Elo variant comparison"):
             st.dataframe(variant_df, width="stretch", hide_index=True)
 
-    if st.button("Refresh odds now"):
-        result = refresh_live_odds_and_predictions(force_refresh=True)
-        for warning in result.get("warnings", []):
-            if "Ignored" in str(warning) and "provider odds event" in str(warning):
-                st.info(warning)
-            else:
-                st.warning(warning)
-        if result.get("last_error"):
-            st.warning(result["last_error"])
-        st.session_state.data_mode = "live"
-        st.success(
-            f"Odds refresh completed via {result['active_odds_source']}. "
-            f"{result['matches_with_odds']} / {result['matches_total']} matches have odds."
-        )
+    refresh_odds_from_ui("Refresh odds now", key="admin_refresh_odds_now")
+    if st.session_state.get("last_odds_refresh_result"):
         with st.expander("Provider metadata", expanded=True):
-            st.json(result)
+            st.json(st.session_state["last_odds_refresh_result"])
 
     st.divider()
     st.subheader("Model source")
