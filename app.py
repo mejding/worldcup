@@ -1378,10 +1378,26 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
             st.session_state.data_mode = "live"
         st.session_state.pop("_prediction_prepare_signature", None)
         _load_enriched_predictions_cached.clear()
-        st.session_state["last_odds_refresh_message"] = (
-            f"Odds refresh completed via {result['active_odds_source']}. "
-            f"{result['matches_with_odds']} / {result['matches_total']} matches have odds."
-        )
+        source = result.get("active_odds_source", "missing")
+        if source == "manual":
+            source_label = "Danske Spil CSV"
+        elif source == "api":
+            source_label = "The Odds API"
+        elif source == "cached":
+            source_label = "cached odds snapshot"
+        else:
+            source_label = "missing odds source"
+        if result.get("matches_with_odds", 0) > 0:
+            refresh_message = (
+                f"Odds opdateret via {source_label}. "
+                f"{result['matches_with_odds']} / {result['matches_total']} kampe har odds."
+            )
+        else:
+            refresh_message = (
+                f"Ingen odds blev opdateret via {source_label}. "
+                "Tjek ODDS_API_KEY eller data/reference/manual_odds.csv."
+            )
+        st.session_state["last_odds_refresh_message"] = refresh_message
         st.session_state["last_odds_refresh_result"] = result
         st.rerun()
     except Exception as exc:
