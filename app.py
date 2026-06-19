@@ -199,7 +199,7 @@ from model_performance_summary import (
     validation_checklist,
 )
 from odds_provider import get_odds_source_status
-from odds_utils import calculate_edge
+from odds_utils import calculate_edge, decimal_odds_to_implied_probability, remove_overround_proportional
 from probability_sources import (
     PROBABILITY_SOURCE_LABELS,
     apply_probability_source,
@@ -834,6 +834,52 @@ def probability_line_for_source(row, prefix: str) -> str:
     )
 
 
+def danske_spil_probability_values(row) -> Optional[list[float]]:
+    odds_values = [
+        pd.to_numeric(row.get("ds_home_odds"), errors="coerce"),
+        pd.to_numeric(row.get("ds_draw_odds"), errors="coerce"),
+        pd.to_numeric(row.get("ds_away_odds"), errors="coerce"),
+    ]
+    if any(pd.isna(odds) or float(odds) <= 1.0 for odds in odds_values):
+        return None
+    implied = [decimal_odds_to_implied_probability(float(odds)) for odds in odds_values]
+    return remove_overround_proportional(implied)
+
+
+def danske_spil_probability_line(row) -> str:
+    probabilities = danske_spil_probability_values(row)
+    if probabilities is None:
+        return "Afventer Danske Spil odds"
+    return (
+        f"{row['home_team']} {format_probability(probabilities[0])} · "
+        f"Draw {format_probability(probabilities[1])} · "
+        f"{row['away_team']} {format_probability(probabilities[2])}"
+    )
+
+
+def model_vs_danske_spil_difference_note(row, threshold: float = 0.05) -> str:
+    ds_probabilities = danske_spil_probability_values(row)
+    if ds_probabilities is None or not row_has_distinct_ml_model(row):
+        return ""
+    model_probabilities = [
+        pd.to_numeric(row.get("model_home_prob"), errors="coerce"),
+        pd.to_numeric(row.get("model_draw_prob"), errors="coerce"),
+        pd.to_numeric(row.get("model_away_prob"), errors="coerce"),
+    ]
+    if any(pd.isna(probability) for probability in model_probabilities):
+        return ""
+    labels = [row["home_team"], "Draw", row["away_team"]]
+    differences = [
+        (label, float(model) - float(ds))
+        for label, model, ds in zip(labels, model_probabilities, ds_probabilities)
+    ]
+    label, difference = max(differences, key=lambda item: abs(item[1]))
+    if abs(difference) < threshold:
+        return ""
+    direction = "higher" if difference > 0 else "lower"
+    return f"Differs from Danske Spil: {label} is {format_percentage(abs(difference))} {direction} in ML."
+
+
 def favorite_for_source(row, prefix: str) -> str:
     line = probability_line_for_source(row, prefix)
     if line.startswith("Afventer"):
@@ -1449,6 +1495,13 @@ def odds_provenance_text(df: pd.DataFrame) -> str:
 def compact_match_card(row) -> None:
     prediction = match_prediction_summary(row)
     model_line = probability_line_for_source(row, "model")
+    ds_odds_line = danske_spil_probability_line(row)
+    difference_note = model_vs_danske_spil_difference_note(row)
+    difference_line = (
+        f"<div class=\"wc-match-reason\"><b>Model/odds gap:</b> {html.escape(difference_note)}</div>"
+        if difference_note
+        else ""
+    )
     status_label = {
         "play": "Play",
         "no_bet": "No bet",
@@ -1473,7 +1526,9 @@ def compact_match_card(row) -> None:
             <div class="{status_class} wc-match-status">{status}</div>
           </div>
           <div class="wc-match-line"><b>Favorite:</b> {html.escape(str(row.get('model_favorite_label', prediction['favorite'])))} · {html.escape(format_probability(row.get('model_favorite_probability', 0)))}</div>
-          <div class="wc-match-line"><b>Prediction:</b> {html.escape(model_line)}</div>
+          <div class="wc-match-line"><b>ML model:</b> {html.escape(model_line)}</div>
+          <div class="wc-match-line"><b>Danske Spil odds:</b> {html.escape(ds_odds_line)}</div>
+          {difference_line}
           <div class="wc-match-line"><b>{html.escape(primary_decision_title())}:</b> {html.escape(primary_decision_text(row))}</div>
           {stake_line}
           <div class="wc-match-reason"><b>Reason:</b> {html.escape(str(row.get('primary_reason') or no_bet_reason(row, 'ds')))}</div>
