@@ -128,6 +128,7 @@ LIVE_PREDICTIONS_WITH_MODEL_PATH = getattr(
 )
 MANUAL_ODDS_PATH = getattr(app_config, "MANUAL_ODDS_PATH", REFERENCE_DATA_DIR / "manual_odds.csv")
 MATCH_RESULTS_PATH = getattr(app_config, "MATCH_RESULTS_PATH", REFERENCE_DATA_DIR / "match_results.csv")
+MATCH_RESULTS_UPDATES_PATH = getattr(app_config, "MATCH_RESULTS_UPDATES_PATH", REFERENCE_DATA_DIR / "match_results_updates.csv")
 MODEL_PATH = getattr(app_config, "MODEL_PATH", MODELS_DIR / "model.pkl")
 MODEL_METADATA_PATH = getattr(app_config, "MODEL_METADATA_PATH", MODELS_DIR / "model_metadata.json")
 MODEL_VARIANT_COMPARISON_PATH = getattr(
@@ -185,6 +186,7 @@ from historical_data import load_historical_results, standardize_historical_resu
 from kelly import calculate_final_stake_fraction, calculate_suggested_stake
 from live_data_pipeline import live_odds_refresh_needed, refresh_live_odds_and_predictions
 from match_results import add_match_results, split_active_and_archived_matches
+from match_result_refresh import refresh_match_results
 from model_readiness import is_production_performance_available
 from model_registry import get_active_model_status, get_latest_backtest_status, get_latest_draw_context_status, get_model_readiness
 from model_performance_summary import (
@@ -341,6 +343,7 @@ def _prediction_data_signature() -> tuple:
         _path_signature(REFERENCE_FIXTURES_PATH),
         _path_signature(SAMPLE_PREDICTIONS_PATH),
         _path_signature(MATCH_RESULTS_PATH),
+        _path_signature(MATCH_RESULTS_UPDATES_PATH),
         _path_signature(BANKROLL_STATE_PATH),
     )
 
@@ -1385,6 +1388,21 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
         st.error(f"Could not refresh odds: {exc}")
 
 
+def refresh_matches_from_ui(button_label: str, key: str, use_container_width: bool = False) -> None:
+    if not st.button(button_label, key=key, use_container_width=use_container_width):
+        return
+    try:
+        with st.spinner("Refreshing match results..."):
+            result = refresh_match_results()
+        st.session_state.pop("_prediction_prepare_signature", None)
+        _load_enriched_predictions_cached.clear()
+        st.session_state["last_match_refresh_message"] = result["message"]
+        st.session_state["last_match_refresh_result"] = result
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Could not refresh matches: {exc}")
+
+
 def odds_provenance_text(df: pd.DataFrame) -> str:
     if st.session_state.active_data_mode == "sample":
         return "Odds: Sample/demo odds - not real bookmaker odds."
@@ -1464,16 +1482,22 @@ def page_overview(df: pd.DataFrame) -> None:
     refresh_message = st.session_state.pop("last_odds_refresh_message", None)
     if refresh_message:
         st.success(refresh_message)
-    archive_col, refresh_col = st.columns([1, 1])
+    match_refresh_message = st.session_state.pop("last_match_refresh_message", None)
+    if match_refresh_message:
+        st.success(match_refresh_message)
+    archive_col, odds_refresh_col, matches_refresh_col = st.columns([1, 1, 1])
     with archive_col:
         st.caption(f"{len(archived_df)} afviklede kampe er flyttet til Match Archive.")
         if st.button("View archive", key="overview_view_archive", disabled=archived_df.empty, use_container_width=True):
             st.session_state.page = "Match Archive"
             st.session_state.current_page = "Match Archive"
             st.rerun()
-    with refresh_col:
+    with odds_refresh_col:
         st.caption("Opdater odds og live predictions.")
         refresh_odds_from_ui("Refresh odds", key="overview_refresh_odds", use_container_width=True)
+    with matches_refresh_col:
+        st.caption("Opdater resultater og arkiv.")
+        refresh_matches_from_ui("Refresh matches", key="overview_refresh_matches", use_container_width=True)
     if st.session_state.active_data_mode == "sample":
         st.warning("Sample/demo data is selected manually. These are not official World Cup fixtures.")
     if active_df.empty:
