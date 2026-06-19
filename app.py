@@ -1424,6 +1424,14 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
             st.session_state.data_mode = "live"
         st.session_state.pop("_prediction_prepare_signature", None)
         _load_enriched_predictions_cached.clear()
+        model_refresh_messages = []
+        if result.get("matches_with_odds", 0) > 0:
+            try:
+                model_refresh_messages = prepare_best_available_predictions()
+            except Exception as exc:
+                model_refresh_messages = [f"Model predictions could not be regenerated after odds refresh: {exc}"]
+            st.session_state.pop("_prediction_prepare_signature", None)
+            _load_enriched_predictions_cached.clear()
         source = result.get("active_odds_source", "missing")
         if source == "manual":
             source_label = "Danske Spil CSV"
@@ -1443,6 +1451,8 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
                 f"Ingen odds blev opdateret via {source_label}. "
                 "Tjek ODDS_API_KEY eller data/reference/manual_odds.csv."
             )
+        if model_refresh_messages:
+            refresh_message = f"{refresh_message} {' '.join(model_refresh_messages)}"
         st.session_state["last_odds_refresh_message"] = refresh_message
         st.session_state["last_odds_refresh_result"] = result
         st.rerun()
