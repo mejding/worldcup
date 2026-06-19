@@ -22,6 +22,7 @@ from config import (
 from fixture_data import load_fixture_dataset
 from fixture_data import build_predictions_from_fixtures
 from manual_odds import load_manual_odds as load_manual_odds_wide, normalize_manual_odds
+from match_results import add_match_results, split_active_and_archived_matches
 from odds_normalizer import normalize_the_odds_api_response
 from odds_mapping import (
     OUTCOME_ORDER,
@@ -294,6 +295,20 @@ def refresh_live_odds_and_predictions(force_refresh: bool = False, allow_api_fet
     _write_live_predictions(live_df, LIVE_PREDICTIONS_PATH)
 
     odds_available = int(match_odds_df["odds_available"].sum()) if "odds_available" in match_odds_df.columns else 0
+    active_df, archived_df = split_active_and_archived_matches(add_match_results(live_df))
+    active_odds_available = (
+        int(active_df["odds_available"].sum())
+        if "odds_available" in active_df.columns
+        else 0
+    )
+    active_missing_odds = int(len(active_df) - active_odds_available)
+    if active_missing_odds == 0 and warnings:
+        warnings = [
+            "All visible upcoming matches have odds. Archived or currently unpriced fixtures are ignored in Match Overview."
+            if str(warning).startswith("No odds matched for ")
+            else warning
+            for warning in warnings
+        ]
     return {
         "status": "ok" if odds_available else "missing_odds",
         "active_odds_source": metadata.get("active_odds_source", status.get("active_odds_source", "missing")),
@@ -309,6 +324,10 @@ def refresh_live_odds_and_predictions(force_refresh: bool = False, allow_api_fet
         "matches_total": int(len(match_odds_df)),
         "matches_with_odds": odds_available,
         "matches_missing_odds": int(len(match_odds_df) - odds_available),
+        "active_matches_total": int(len(active_df)),
+        "active_matches_with_odds": active_odds_available,
+        "active_matches_missing_odds": active_missing_odds,
+        "archived_matches_total": int(len(archived_df)),
         "bookmaker_count": int(match_odds_df["bookmaker_count"].max()) if "bookmaker_count" in match_odds_df.columns and not match_odds_df.empty else 0,
         "latest_odds_path": str(PROCESSED_ODDS_PATH),
         "live_predictions_path": str(LIVE_PREDICTIONS_PATH),

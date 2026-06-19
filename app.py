@@ -1436,7 +1436,10 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
         with st.spinner("Refreshing odds..."):
             result = refresh_live_odds_and_predictions(force_refresh=True)
         for warning in result.get("warnings", []):
-            if "Ignored" in str(warning) and "provider odds event" in str(warning):
+            if (
+                ("Ignored" in str(warning) and "provider odds event" in str(warning))
+                or str(warning).startswith("All visible upcoming matches have odds")
+            ):
                 st.info(warning)
             else:
                 st.warning(warning)
@@ -1452,6 +1455,11 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
                 model_refresh_messages = prepare_best_available_predictions()
             except Exception as exc:
                 model_refresh_messages = [f"Model predictions could not be regenerated after odds refresh: {exc}"]
+            if result.get("active_matches_missing_odds", result.get("matches_missing_odds", 0)) == 0:
+                model_refresh_messages = [
+                    message for message in model_refresh_messages
+                    if "odds are unavailable for one or more matches" not in str(message)
+                ]
             st.session_state.pop("_prediction_prepare_signature", None)
             _load_enriched_predictions_cached.clear()
         source = result.get("active_odds_source", "missing")
@@ -1463,10 +1471,12 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
             source_label = "cached odds snapshot"
         else:
             source_label = "missing odds source"
-        if result.get("matches_with_odds", 0) > 0:
+        matches_with_odds = result.get("active_matches_with_odds", result.get("matches_with_odds", 0))
+        matches_total = result.get("active_matches_total", result.get("matches_total", 0))
+        if matches_with_odds > 0:
             refresh_message = (
                 f"Odds opdateret via {source_label}. "
-                f"{result['matches_with_odds']} / {result['matches_total']} kampe har odds."
+                f"{matches_with_odds} / {matches_total} synlige kommende kampe har odds."
             )
         else:
             refresh_message = (
