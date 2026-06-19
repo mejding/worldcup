@@ -880,6 +880,28 @@ def model_vs_danske_spil_difference_note(row, threshold: float = 0.05) -> str:
     return f"Differs from Danske Spil: {label} is {format_percentage(abs(difference))} {direction} in ML."
 
 
+def recommended_bet_is_danske_spil_favorite(row) -> bool:
+    if row.get("primary_status") != "play":
+        return False
+    odds_by_outcome = {
+        "Home": pd.to_numeric(row.get("ds_home_odds"), errors="coerce"),
+        "Draw": pd.to_numeric(row.get("ds_draw_odds"), errors="coerce"),
+        "Away": pd.to_numeric(row.get("ds_away_odds"), errors="coerce"),
+    }
+    valid_odds = {
+        outcome: float(odds)
+        for outcome, odds in odds_by_outcome.items()
+        if not pd.isna(odds) and float(odds) > 1.0
+    }
+    if len(valid_odds) != 3:
+        return False
+    favorite_outcome = min(valid_odds, key=valid_odds.get)
+    recommended = row.get("recommended_outcome_ds")
+    if st.session_state.get("preferred_bookmaker_mode") == "best_market":
+        recommended = row.get("recommended_outcome_best")
+    return recommended == favorite_outcome
+
+
 def favorite_for_source(row, prefix: str) -> str:
     line = probability_line_for_source(row, prefix)
     if line.startswith("Afventer"):
@@ -1523,6 +1545,11 @@ def compact_match_card(row) -> None:
         "no_bet": "wc-status-muted",
         "odds_missing": "wc-status-amber",
     }.get(str(row.get("primary_status")), "wc-status-muted")
+    favorite_label = (
+        " <span class=\"wc-mini-label\">Favorite bet</span>"
+        if recommended_bet_is_danske_spil_favorite(row)
+        else ""
+    )
     stake = primary_stake_text(row)
     stake_line = f"<div class=\"wc-match-line\"><b>Suggested stake:</b> {html.escape(stake)}</div>" if stake else ""
     st.markdown(
@@ -1533,7 +1560,7 @@ def compact_match_card(row) -> None:
               <div class="wc-match-title">{html.escape(match_label(row))}</div>
               <div class="wc-match-meta">{html.escape(str(row.get('kickoff_time_dk', row['kickoff_time'])))} · Group {html.escape(str(row['group']))} · MD {html.escape(str(row['matchday']))}</div>
             </div>
-            <div class="{status_class} wc-match-status">{status}</div>
+            <div class="{status_class} wc-match-status">{status}{favorite_label}</div>
           </div>
           <div class="wc-match-line"><b>Favorite:</b> {html.escape(str(row.get('model_favorite_label', prediction['favorite'])))} · {html.escape(format_probability(row.get('model_favorite_probability', 0)))}</div>
           <div class="wc-match-line"><b>ML model:</b> {html.escape(model_line)}</div>

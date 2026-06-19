@@ -83,6 +83,22 @@ def apply_custom_theme() -> None:
         }
         .wc-match-reason { color: var(--wc-muted); }
         .wc-match-status { white-space: nowrap; font-size: 0.8rem; line-height: 1.2; }
+        .wc-mini-label {
+            display: inline-flex;
+            align-items: center;
+            vertical-align: middle;
+            margin-left: 0.32rem;
+            width: max-content;
+            border: 1px solid #bbf7d0;
+            border-radius: 999px;
+            background: #f0fdf4;
+            color: #166534;
+            font-size: 0.68rem;
+            font-weight: 700;
+            line-height: 1;
+            padding: 0.18rem 0.38rem;
+            white-space: nowrap;
+        }
         @media (max-width: 900px) {
             .stApp:has([data-testid="stSidebar"][aria-expanded="true"]) .block-container {
                 padding-left: calc(256px + 0.75rem);
