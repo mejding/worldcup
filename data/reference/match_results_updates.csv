@@ -1,3 +1,7 @@
 match_id,home_score,away_score,result_status,result_favorite_outcome,result_last_checked_utc,result_source,result_notes
 WC2026-GRB-004,6,0,final,home,2026-06-19T00:00:00Z,The Guardian,Canada 6-0 Qatar
 WC2026-GRA-004,1,0,final,home,2026-06-19T03:00:00Z,The Guardian,Mexico 1-0 South Korea
+WC2026-GRD-004,2,0,final,home,2026-06-20T11:50:00Z,The Guardian,United States 2-0 Australia
+WC2026-GRC-003,0,1,final,away,2026-06-20T11:50:00Z,The Guardian,Scotland 0-1 Morocco
+WC2026-GRC-004,3,0,final,home,2026-06-20T11:50:00Z,The Guardian,Brazil 3-0 Haiti
+WC2026-GRD-003,0,1,final,home,2026-06-20T11:50:00Z,The Guardian,Türkiye 0-1 Paraguay
