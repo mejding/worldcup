@@ -205,22 +205,27 @@ No secrets are required for official fixture mode or sample/demo mode.
 
 API-based live odds mode requires `ODDS_API_KEY`. Manual odds CSV and cached snapshots do not require secrets.
 
+Match result refresh can also read an external CSV feed via `MATCH_RESULTS_FEED_URL`. The feed must use the same columns as `data/reference/match_results_updates.csv`. Local rows and remote rows are combined, with remote rows taking precedence for the same `match_id`.
+
 Local environment variable:
 
 ```bash
 export ODDS_API_KEY="your_key"
+export MATCH_RESULTS_FEED_URL="https://example.com/worldcup_results.csv"
 ```
 
 Or create a local `.streamlit/secrets.toml` file:
 
 ```toml
 ODDS_API_KEY = "your_key"
+MATCH_RESULTS_FEED_URL = "https://example.com/worldcup_results.csv"
 ```
 
 For Streamlit Community Cloud, add this in app secrets:
 
 ```toml
 ODDS_API_KEY = "your_key"
+MATCH_RESULTS_FEED_URL = "https://example.com/worldcup_results.csv"
 ```
 
 Do not commit real secrets. `.streamlit/secrets.toml.example` is committed only as documentation.
@@ -608,6 +613,7 @@ Example:
 - If sample/demo mode fails, confirm that `data/sample_predictions.csv` is committed.
 - If bankroll or bet-log files are missing, restart the app; runtime files are recreated automatically.
 - If the app says `Odds data source missing`, add `ODDS_API_KEY` via environment variable/Streamlit secrets, create `data/reference/manual_odds.csv` with valid odds, or refresh odds after adding the key.
+- If Match Archive shows `Resultat mangler`, add the missing score to `data/reference/match_results_updates.csv` or configure `MATCH_RESULTS_FEED_URL` and press `Refresh matches`.
 - If the odds API returns no events, rate limits or omits draw odds, the app keeps official fixture rows where possible and shows a warning.
 - If a bet cannot be settled, check that it is still pending. Double settlement is intentionally blocked.
 - If the app shows sample-data validation errors, fix `data/sample_predictions.csv` before using demo mode.
