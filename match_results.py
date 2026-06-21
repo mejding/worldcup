@@ -47,6 +47,14 @@ def _actual_outcome(row) -> str:
     return "draw"
 
 
+def _past_kickoff_flags(df: pd.DataFrame) -> pd.Series:
+    kickoff_column = "kickoff_time" if "kickoff_time" in df.columns else "kickoff_utc" if "kickoff_utc" in df.columns else None
+    if kickoff_column is None:
+        return pd.Series(False, index=df.index)
+    kickoff = pd.to_datetime(df[kickoff_column], errors="coerce", utc=True)
+    return kickoff.notna() & kickoff.le(pd.Timestamp.now(tz="UTC"))
+
+
 def _favorite_outcome(row) -> str:
     result_favorite = row.get("result_favorite_outcome")
     if not pd.isna(result_favorite) and str(result_favorite) in {"home", "away"}:
@@ -92,7 +100,7 @@ def outcome_label(outcome: str, home_team: str, away_team: str) -> str:
 
 def _favorite_result_status(row) -> str:
     if not bool(row.get("is_completed")):
-        return "Upcoming"
+        return "Resultat mangler" if bool(row.get("is_past_kickoff")) else "Upcoming"
     actual_outcome = row.get("actual_outcome")
     favorite_outcome = row.get("favorite_outcome")
     if pd.isna(actual_outcome):
@@ -108,12 +116,26 @@ def add_match_results(predictions: pd.DataFrame, results: Optional[pd.DataFrame]
     result = predictions.copy()
     match_results = load_match_results() if results is None else results.copy()
     if match_results.empty:
+        for column in MATCH_RESULTS_COLUMNS:
+            if column not in result.columns:
+                result[column] = pd.NA
         result["is_completed"] = False
-        result["archive_status"] = "Upcoming"
+        result["is_past_kickoff"] = _past_kickoff_flags(result)
+        result["actual_outcome"] = pd.NA
+        result["favorite_outcome"] = result.apply(_favorite_outcome, axis=1)
+        result["actual_outcome_label"] = "-"
+        result["favorite_outcome_label"] = result.apply(
+            lambda row: outcome_label(row.get("favorite_outcome"), row.get("home_team"), row.get("away_team")),
+            axis=1,
+        )
+        result["favorite_result_status"] = result.apply(_favorite_result_status, axis=1)
+        result["full_time_score"] = ""
+        result["archive_status"] = result["favorite_result_status"]
         return result
 
     result = result.merge(match_results, on="match_id", how="left")
     result["is_completed"] = result["result_status"].fillna("").str.lower().eq("final")
+    result["is_past_kickoff"] = _past_kickoff_flags(result)
     result["actual_outcome"] = result.apply(_actual_outcome, axis=1)
     result["favorite_outcome"] = result.apply(_favorite_outcome, axis=1)
     result["actual_outcome_label"] = result.apply(
@@ -136,7 +158,15 @@ def add_match_results(predictions: pd.DataFrame, results: Optional[pd.DataFrame]
 
 
 def split_active_and_archived_matches(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if "is_completed" not in df.columns:
-        return df.copy(), pd.DataFrame(columns=df.columns)
-    completed = df["is_completed"].fillna(False).astype(bool)
-    return df.loc[~completed].copy(), df.loc[completed].copy()
+    completed = (
+        df["is_completed"].fillna(False).astype(bool)
+        if "is_completed" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    past_kickoff = (
+        df["is_past_kickoff"].fillna(False).astype(bool)
+        if "is_past_kickoff" in df.columns
+        else _past_kickoff_flags(df)
+    )
+    archived = completed | past_kickoff
+    return df.loc[~archived].copy(), df.loc[archived].copy()

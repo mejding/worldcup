@@ -213,3 +213,35 @@ def test_split_active_and_archived_matches():
 
     assert set(active["match_id"]) == {"m2", "m3"}
     assert set(archived["match_id"]) == {"m1"}
+
+
+def test_split_archives_past_kickoff_without_result():
+    predictions = pd.DataFrame(
+        [
+            {
+                "match_id": "past",
+                "home_team": "Netherlands",
+                "away_team": "Sweden",
+                "kickoff_time": "2026-06-20T17:00:00Z",
+                "active_home_prob": 0.55,
+                "active_draw_prob": 0.25,
+                "active_away_prob": 0.20,
+            },
+            {
+                "match_id": "future",
+                "home_team": "Japan",
+                "away_team": "Sweden",
+                "kickoff_time": "2099-06-25T23:00:00Z",
+                "active_home_prob": 0.40,
+                "active_draw_prob": 0.30,
+                "active_away_prob": 0.30,
+            },
+        ]
+    )
+
+    df = add_match_results(predictions, pd.DataFrame())
+    active, archived = split_active_and_archived_matches(df)
+
+    assert set(active["match_id"]) == {"future"}
+    assert set(archived["match_id"]) == {"past"}
+    assert archived.iloc[0]["favorite_result_status"] == "Resultat mangler"
