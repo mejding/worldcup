@@ -1,45 +1,60 @@
 match_id,home_team,away_team,kickoff_utc,bookmaker,home_odds,draw_odds,away_odds,odds_last_updated_utc,bookmaker_key,is_danske_spil,source,notes
-WC2026-GRD-004,United States,Australia,2026-06-19T19:00:00Z,Danske Spil,1.62,4.25,5.25,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,United States 1.62 / Draw 4.25 / Australia 5.25
-WC2026-GRC-003,Scotland,Morocco,2026-06-19T22:00:00Z,Danske Spil,5.25,3.6,1.75,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Scotland 5.25 / Draw 3.6 / Morocco 1.75
-WC2026-GRC-004,Brazil,Haiti,2026-06-20T01:00:00Z,Danske Spil,1.1,11.0,22.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Brazil 1.1 / Draw 11.0 / Haiti 22.0
-WC2026-GRD-003,Türkiye,Paraguay,2026-06-20T04:00:00Z,Danske Spil,2.08,3.4,3.75,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Türkiye 2.08 / Draw 3.4 / Paraguay 3.75
-WC2026-GRF-003,Netherlands,Sweden,2026-06-20T17:00:00Z,Danske Spil,1.78,3.8,4.5,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Netherlands 1.78 / Draw 3.8 / Sweden 4.5
-WC2026-GRE-003,Germany,Côte d'Ivoire,2026-06-20T20:00:00Z,Danske Spil,1.56,4.5,5.75,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Germany 1.56 / Draw 4.5 / Côte d'Ivoire 5.75
-WC2026-GRE-004,Ecuador,Curaçao,2026-06-21T00:00:00Z,Danske Spil,1.12,10.0,21.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Ecuador 1.12 / Draw 10.0 / Curaçao 21.0
-WC2026-GRF-004,Tunisia,Japan,2026-06-21T04:00:00Z,Danske Spil,6.25,4.0,1.56,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Tunisia 6.25 / Draw 4.0 / Japan 1.56
-WC2026-GRH-004,Spain,Saudi Arabia,2026-06-21T16:00:00Z,Danske Spil,1.11,10.0,23.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Spain 1.11 / Draw 10.0 / Saudi Arabia 23.0
-WC2026-GRG-003,Belgium,IR Iran,2026-06-21T19:00:00Z,Danske Spil,1.44,4.75,7.5,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Belgium 1.44 / Draw 4.75 / IR Iran 7.5
-WC2026-GRH-003,Uruguay,Cabo Verde,2026-06-21T22:00:00Z,Danske Spil,1.5,4.25,7.25,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Uruguay 1.5 / Draw 4.25 / Cabo Verde 7.25
-WC2026-GRG-004,New Zealand,Egypt,2026-06-22T01:00:00Z,Danske Spil,5.5,3.95,1.64,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,New Zealand 5.5 / Draw 3.95 / Egypt 1.64
-WC2026-GRJ-003,Argentina,Austria,2026-06-22T17:00:00Z,Danske Spil,1.62,4.0,5.75,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Argentina 1.62 / Draw 4.0 / Austria 5.75
-WC2026-GRI-004,France,Iraq,2026-06-22T21:00:00Z,Danske Spil,1.09,11.5,26.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,France 1.09 / Draw 11.5 / Iraq 26.0
-WC2026-GRI-003,Norway,Senegal,2026-06-23T00:00:00Z,Danske Spil,2.35,3.45,3.05,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Norway 2.35 / Draw 3.45 / Senegal 3.05
-WC2026-GRJ-004,Jordan,Algeria,2026-06-23T03:00:00Z,Danske Spil,5.5,4.0,1.62,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Jordan 5.5 / Draw 4.0 / Algeria 1.62
-WC2026-GRK-003,Portugal,Uzbekistan,2026-06-23T17:00:00Z,Danske Spil,1.22,7.0,13.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Portugal 1.22 / Draw 7.0 / Uzbekistan 13.0
-WC2026-GRL-003,England,Ghana,2026-06-23T20:00:00Z,Danske Spil,1.23,6.5,13.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,England 1.23 / Draw 6.5 / Ghana 13.0
-WC2026-GRL-004,Panama,Croatia,2026-06-23T23:00:00Z,Danske Spil,6.25,4.25,1.56,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Panama 6.25 / Draw 4.25 / Croatia 1.56
-WC2026-GRK-004,Colombia,Congo DR,2026-06-24T02:00:00Z,Danske Spil,1.51,4.25,7.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Colombia 1.51 / Draw 4.25 / Congo DR 7.0
-WC2026-GRB-006,Bosnia and Herzegovina,Qatar,2026-06-24T19:00:00Z,Danske Spil,1.43,5.0,7.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Bosnia and Herzegovina 1.43 / Draw 5.0 / Qatar 7.0
-WC2026-GRB-005,Switzerland,Canada,2026-06-24T19:00:00Z,Danske Spil,2.46,3.15,3.15,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Switzerland 2.46 / Draw 3.15 / Canada 3.15
-WC2026-GRC-006,Morocco,Haiti,2026-06-24T22:00:00Z,Danske Spil,1.29,6.0,10.0,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Morocco 1.29 / Draw 6.0 / Haiti 10.0
-WC2026-GRC-005,Scotland,Brazil,2026-06-24T22:00:00Z,Danske Spil,7.25,4.75,1.44,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Scotland 7.25 / Draw 4.75 / Brazil 1.44
-WC2026-GRA-005,Czechia,Mexico,2026-06-25T01:00:00Z,Danske Spil,3.4,3.5,2.16,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Czechia 3.4 / Draw 3.5 / Mexico 2.16
-WC2026-GRA-006,South Africa,South Korea,2026-06-25T01:00:00Z,Danske Spil,5.5,3.95,1.65,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,South Africa 5.5 / Draw 3.95 / South Korea 1.65
-WC2026-GRE-005,Curaçao,Côte d'Ivoire,2026-06-25T20:00:00Z,Danske Spil,18.0,9.0,1.13,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Curaçao 18.0 / Draw 9.0 / Côte d'Ivoire 1.13
-WC2026-GRE-006,Ecuador,Germany,2026-06-25T20:00:00Z,Danske Spil,5.0,3.8,1.7,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Ecuador 5.0 / Draw 3.8 / Germany 1.7
-WC2026-GRF-005,Japan,Sweden,2026-06-25T23:00:00Z,Danske Spil,2.17,3.4,3.4,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Japan 2.17 / Draw 3.4 / Sweden 3.4
-WC2026-GRF-006,Tunisia,Netherlands,2026-06-25T23:00:00Z,Danske Spil,8.75,5.5,1.33,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Tunisia 8.75 / Draw 5.5 / Netherlands 1.33
-WC2026-GRD-005,Türkiye,United States,2026-06-26T02:00:00Z,Danske Spil,2.8,3.55,2.43,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Türkiye 2.8 / Draw 3.55 / United States 2.43
-WC2026-GRD-006,Paraguay,Australia,2026-06-26T02:00:00Z,Danske Spil,2.19,3.25,3.5,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Paraguay 2.19 / Draw 3.25 / Australia 3.5
-WC2026-GRI-005,Norway,France,2026-06-26T19:00:00Z,Danske Spil,4.25,3.7,1.84,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Norway 4.25 / Draw 3.7 / France 1.84
-WC2026-GRI-006,Senegal,Iraq,2026-06-26T19:00:00Z,Danske Spil,1.33,5.25,9.5,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Senegal 1.33 / Draw 5.25 / Iraq 9.5
-WC2026-GRH-006,Uruguay,Spain,2026-06-27T00:00:00Z,Danske Spil,5.75,4.25,1.57,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Uruguay 5.75 / Draw 4.25 / Spain 1.57
-WC2026-GRH-005,Cabo Verde,Saudi Arabia,2026-06-27T00:00:00Z,Danske Spil,2.8,3.5,2.44,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Cabo Verde 2.8 / Draw 3.5 / Saudi Arabia 2.44
-WC2026-GRG-005,Egypt,IR Iran,2026-06-27T03:00:00Z,Danske Spil,2.11,3.15,3.9,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Egypt 2.11 / Draw 3.15 / IR Iran 3.9
-WC2026-GRG-006,New Zealand,Belgium,2026-06-27T03:00:00Z,Danske Spil,12.0,6.5,1.23,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,New Zealand 12.0 / Draw 6.5 / Belgium 1.23
-WC2026-GRL-006,Croatia,Ghana,2026-06-27T21:00:00Z,Danske Spil,1.6,3.95,5.75,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Croatia 1.6 / Draw 3.95 / Ghana 5.75
-WC2026-GRL-005,Panama,England,2026-06-27T21:00:00Z,Danske Spil,10.0,6.25,1.26,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Panama 10.0 / Draw 6.25 / England 1.26
-WC2026-GRK-005,Colombia,Portugal,2026-06-27T23:30:00Z,Danske Spil,3.5,3.3,2.17,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Colombia 3.5 / Draw 3.3 / Portugal 2.17
-WC2026-GRK-006,Congo DR,Uzbekistan,2026-06-27T23:30:00Z,Danske Spil,2.12,3.5,3.45,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Congo DR 2.12 / Draw 3.5 / Uzbekistan 3.45
-WC2026-GRJ-005,Algeria,Austria,2026-06-28T02:00:00Z,Danske Spil,3.0,3.1,2.54,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Algeria 3.0 / Draw 3.1 / Austria 2.54
-WC2026-GRJ-006,Jordan,Argentina,2026-06-28T02:00:00Z,Danske Spil,12.5,7.0,1.21,2026-06-19T10:09:00Z,danske_spil,true,Danske Spil Oddset,Jordan 12.5 / Draw 7.0 / Argentina 1.21
+WC2026-GRD-004,United States,Australia,2026-06-19T19:00:00Z,Danske Spil,1.62,4.25,5.25,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,United States 1.62 / Draw 4.25 / Australia 5.25
+WC2026-GRC-003,Scotland,Morocco,2026-06-19T22:00:00Z,Danske Spil,5.25,3.6,1.75,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Scotland 5.25 / Draw 3.6 / Morocco 1.75
+WC2026-GRC-004,Brazil,Haiti,2026-06-20T01:00:00Z,Danske Spil,1.1,11.0,22.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Brazil 1.1 / Draw 11.0 / Haiti 22.0
+WC2026-GRD-003,Türkiye,Paraguay,2026-06-20T04:00:00Z,Danske Spil,2.08,3.4,3.75,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Türkiye 2.08 / Draw 3.4 / Paraguay 3.75
+WC2026-GRF-003,Netherlands,Sweden,2026-06-20T17:00:00Z,Danske Spil,1.78,3.8,4.5,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Netherlands 1.78 / Draw 3.8 / Sweden 4.5
+WC2026-GRE-003,Germany,Côte d'Ivoire,2026-06-20T20:00:00Z,Danske Spil,1.56,4.5,5.75,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Germany 1.56 / Draw 4.5 / Côte d'Ivoire 5.75
+WC2026-GRE-004,Ecuador,Curaçao,2026-06-21T00:00:00Z,Danske Spil,1.12,10.0,21.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Ecuador 1.12 / Draw 10.0 / Curaçao 21.0
+WC2026-GRF-004,Tunisia,Japan,2026-06-21T04:00:00Z,Danske Spil,6.25,4.0,1.56,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Tunisia 6.25 / Draw 4.0 / Japan 1.56
+WC2026-GRH-004,Spain,Saudi Arabia,2026-06-21T16:00:00Z,Danske Spil,1.11,10.0,23.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Spain 1.11 / Draw 10.0 / Saudi Arabia 23.0
+WC2026-GRG-003,Belgium,IR Iran,2026-06-21T19:00:00Z,Danske Spil,1.44,4.75,7.5,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Belgium 1.44 / Draw 4.75 / IR Iran 7.5
+WC2026-GRH-003,Uruguay,Cabo Verde,2026-06-21T22:00:00Z,Danske Spil,1.5,4.25,7.25,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Uruguay 1.5 / Draw 4.25 / Cabo Verde 7.25
+WC2026-GRG-004,New Zealand,Egypt,2026-06-22T01:00:00Z,Danske Spil,5.5,3.95,1.64,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,New Zealand 5.5 / Draw 3.95 / Egypt 1.64
+WC2026-GRJ-003,Argentina,Austria,2026-06-22T17:00:00Z,Danske Spil,1.62,4.0,5.75,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Argentina 1.62 / Draw 4.0 / Austria 5.75
+WC2026-GRI-004,France,Iraq,2026-06-22T21:00:00Z,Danske Spil,1.09,11.5,26.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,France 1.09 / Draw 11.5 / Iraq 26.0
+WC2026-GRI-003,Norway,Senegal,2026-06-23T00:00:00Z,Danske Spil,2.35,3.45,3.05,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Norway 2.35 / Draw 3.45 / Senegal 3.05
+WC2026-GRJ-004,Jordan,Algeria,2026-06-23T03:00:00Z,Danske Spil,5.5,4.0,1.62,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Jordan 5.5 / Draw 4.0 / Algeria 1.62
+WC2026-GRK-003,Portugal,Uzbekistan,2026-06-23T17:00:00Z,Danske Spil,1.22,7.0,13.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Portugal 1.22 / Draw 7.0 / Uzbekistan 13.0
+WC2026-GRL-003,England,Ghana,2026-06-23T20:00:00Z,Danske Spil,1.23,6.5,13.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,England 1.23 / Draw 6.5 / Ghana 13.0
+WC2026-GRL-004,Panama,Croatia,2026-06-23T23:00:00Z,Danske Spil,6.25,4.25,1.56,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Panama 6.25 / Draw 4.25 / Croatia 1.56
+WC2026-GRK-004,Colombia,Congo DR,2026-06-24T02:00:00Z,Danske Spil,1.51,4.25,7.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Colombia 1.51 / Draw 4.25 / Congo DR 7.0
+WC2026-GRB-006,Bosnia and Herzegovina,Qatar,2026-06-24T19:00:00Z,Danske Spil,1.43,5.0,7.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Bosnia and Herzegovina 1.43 / Draw 5.0 / Qatar 7.0
+WC2026-GRB-005,Switzerland,Canada,2026-06-24T19:00:00Z,Danske Spil,2.46,3.15,3.15,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Switzerland 2.46 / Draw 3.15 / Canada 3.15
+WC2026-GRC-006,Morocco,Haiti,2026-06-24T22:00:00Z,Danske Spil,1.29,6.0,10.0,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Morocco 1.29 / Draw 6.0 / Haiti 10.0
+WC2026-GRC-005,Scotland,Brazil,2026-06-24T22:00:00Z,Danske Spil,7.25,4.75,1.44,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Scotland 7.25 / Draw 4.75 / Brazil 1.44
+WC2026-GRA-005,Czechia,Mexico,2026-06-25T01:00:00Z,Danske Spil,3.4,3.5,2.16,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Czechia 3.4 / Draw 3.5 / Mexico 2.16
+WC2026-GRA-006,South Africa,South Korea,2026-06-25T01:00:00Z,Danske Spil,5.5,3.95,1.65,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,South Africa 5.5 / Draw 3.95 / South Korea 1.65
+WC2026-GRE-005,Curaçao,Côte d'Ivoire,2026-06-25T20:00:00Z,Danske Spil,18.0,9.0,1.13,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Curaçao 18.0 / Draw 9.0 / Côte d'Ivoire 1.13
+WC2026-GRE-006,Ecuador,Germany,2026-06-25T20:00:00Z,Danske Spil,5.0,3.8,1.7,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Ecuador 5.0 / Draw 3.8 / Germany 1.7
+WC2026-GRF-005,Japan,Sweden,2026-06-25T23:00:00Z,Danske Spil,2.17,3.4,3.4,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Japan 2.17 / Draw 3.4 / Sweden 3.4
+WC2026-GRF-006,Tunisia,Netherlands,2026-06-25T23:00:00Z,Danske Spil,8.75,5.5,1.33,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Tunisia 8.75 / Draw 5.5 / Netherlands 1.33
+WC2026-GRD-005,Türkiye,United States,2026-06-26T02:00:00Z,Danske Spil,2.8,3.55,2.43,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Türkiye 2.8 / Draw 3.55 / United States 2.43
+WC2026-GRD-006,Paraguay,Australia,2026-06-26T02:00:00Z,Danske Spil,2.19,3.25,3.5,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Paraguay 2.19 / Draw 3.25 / Australia 3.5
+WC2026-GRI-005,Norway,France,2026-06-26T19:00:00Z,Danske Spil,4.25,3.7,1.84,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Norway 4.25 / Draw 3.7 / France 1.84
+WC2026-GRI-006,Senegal,Iraq,2026-06-26T19:00:00Z,Danske Spil,1.33,5.25,9.5,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Senegal 1.33 / Draw 5.25 / Iraq 9.5
+WC2026-GRH-006,Uruguay,Spain,2026-06-27T00:00:00Z,Danske Spil,5.75,4.25,1.57,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Uruguay 5.75 / Draw 4.25 / Spain 1.57
+WC2026-GRH-005,Cabo Verde,Saudi Arabia,2026-06-27T00:00:00Z,Danske Spil,2.8,3.5,2.44,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Cabo Verde 2.8 / Draw 3.5 / Saudi Arabia 2.44
+WC2026-GRG-005,Egypt,IR Iran,2026-06-27T03:00:00Z,Danske Spil,2.11,3.15,3.9,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Egypt 2.11 / Draw 3.15 / IR Iran 3.9
+WC2026-GRG-006,New Zealand,Belgium,2026-06-27T03:00:00Z,Danske Spil,12.0,6.5,1.23,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,New Zealand 12.0 / Draw 6.5 / Belgium 1.23
+WC2026-GRL-006,Croatia,Ghana,2026-06-27T21:00:00Z,Danske Spil,1.6,3.95,5.75,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Croatia 1.6 / Draw 3.95 / Ghana 5.75
+WC2026-GRL-005,Panama,England,2026-06-27T21:00:00Z,Danske Spil,10.0,6.25,1.26,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Panama 10.0 / Draw 6.25 / England 1.26
+WC2026-GRK-005,Colombia,Portugal,2026-06-27T23:30:00Z,Danske Spil,3.5,3.3,2.17,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Colombia 3.5 / Draw 3.3 / Portugal 2.17
+WC2026-GRK-006,Congo DR,Uzbekistan,2026-06-27T23:30:00Z,Danske Spil,2.12,3.5,3.45,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Congo DR 2.12 / Draw 3.5 / Uzbekistan 3.45
+WC2026-GRJ-005,Algeria,Austria,2026-06-28T02:00:00Z,Danske Spil,3.0,3.1,2.54,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Algeria 3.0 / Draw 3.1 / Austria 2.54
+WC2026-GRJ-006,Jordan,Argentina,2026-06-28T02:00:00Z,Danske Spil,12.5,7.0,1.21,2026-06-19T10:09:00Z,danske_spil,True,Danske Spil Oddset,Jordan 12.5 / Draw 7.0 / Argentina 1.21
+WC2026-R32-002,Brazil,Japan,2026-06-29T17:00:00Z,Danske Spil,1.77,3.65,5.0,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Brazil 1.77 / Draw 3.65 / Japan 5.0
+WC2026-R32-003,Germany,Paraguay,2026-06-29T20:30:00Z,Danske Spil,1.38,5.0,8.25,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Germany 1.38 / Draw 5.0 / Paraguay 8.25
+WC2026-R32-004,Netherlands,Morocco,2026-06-30T01:00:00Z,Danske Spil,2.32,3.15,3.4,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Netherlands 2.32 / Draw 3.15 / Morocco 3.4
+WC2026-R32-005,Côte d'Ivoire,Norway,2026-06-30T17:00:00Z,Danske Spil,3.65,3.5,2.07,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Côte d'Ivoire 3.65 / Draw 3.5 / Norway 2.07
+WC2026-R32-006,France,Sweden,2026-06-30T21:00:00Z,Danske Spil,1.28,6.25,10.0,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,France 1.28 / Draw 6.25 / Sweden 10.0
+WC2026-R32-007,Mexico,Ecuador,2026-07-01T01:00:00Z,Danske Spil,2.25,2.95,3.85,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Mexico 2.25 / Draw 2.95 / Ecuador 3.85
+WC2026-R32-008,England,Congo DR,2026-07-01T16:00:00Z,Danske Spil,1.29,5.75,11.0,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,England 1.29 / Draw 5.75 / Congo DR 11.0
+WC2026-R32-009,Belgium,Senegal,2026-07-01T19:00:00Z,Danske Spil,2.22,3.25,3.5,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Belgium 2.22 / Draw 3.25 / Senegal 3.5
+WC2026-R32-010,United States,Bosnia and Herzegovina,2026-07-02T00:00:00Z,Danske Spil,1.39,5.0,8.25,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,United States 1.39 / Draw 5.0 / Bosnia and Herzegovina 8.25
+WC2026-R32-011,Spain,Austria,2026-07-02T19:00:00Z,Danske Spil,1.33,5.25,9.75,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Spain 1.33 / Draw 5.25 / Austria 9.75
+WC2026-R32-012,Portugal,Croatia,2026-07-02T23:00:00Z,Danske Spil,1.82,3.5,4.75,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Portugal 1.82 / Draw 3.5 / Croatia 4.75
+WC2026-R32-013,Switzerland,Algeria,2026-07-03T03:00:00Z,Danske Spil,2.04,3.35,3.9,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Switzerland 2.04 / Draw 3.35 / Algeria 3.9
+WC2026-R32-014,Australia,Egypt,2026-07-03T18:00:00Z,Danske Spil,3.25,2.95,2.54,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Australia 3.25 / Draw 2.95 / Egypt 2.54
+WC2026-R32-015,Argentina,Cabo Verde,2026-07-03T22:00:00Z,Danske Spil,1.19,7.5,15.0,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Argentina 1.19 / Draw 7.5 / Cabo Verde 15.0
+WC2026-R32-016,Colombia,Ghana,2026-07-04T01:30:00Z,Danske Spil,1.54,4.0,6.75,2026-06-29T15:26:00Z,danske_spil,True,Danske Spil Oddset VM 2026 competition page,Colombia 1.54 / Draw 4.0 / Ghana 6.75
