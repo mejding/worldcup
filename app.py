@@ -1466,9 +1466,24 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
         model_refresh_messages = []
         if result.get("matches_with_odds", 0) > 0:
             try:
-                model_refresh_messages = prepare_best_available_predictions()
+                live_df = pd.read_csv(LIVE_PREDICTIONS_PATH)
+                if LIVE_PREDICTIONS_WITH_MODEL_PATH.exists() and LIVE_PREDICTIONS_WITH_MODEL_PATH.stat().st_size > 0:
+                    _, model_warnings = apply_stored_model_predictions(
+                        live_df,
+                        LIVE_PREDICTIONS_WITH_MODEL_PATH,
+                        LIVE_PREDICTIONS_WITH_MODEL_PATH,
+                    )
+                    model_refresh_messages = ["Model predictions matched to refreshed odds."] + model_warnings
+                    st.session_state.model_source = "historical_model_if_available"
+                else:
+                    model_refresh_messages = prepare_best_available_predictions()
             except Exception as exc:
-                model_refresh_messages = [f"Model predictions could not be regenerated after odds refresh: {exc}"]
+                try:
+                    model_refresh_messages = prepare_best_available_predictions()
+                except Exception as model_exc:
+                    model_refresh_messages = [
+                        f"Model predictions could not be regenerated after odds refresh: {exc}; {model_exc}"
+                    ]
             if result.get("active_matches_missing_odds", result.get("matches_missing_odds", 0)) == 0:
                 model_refresh_messages = [
                     message for message in model_refresh_messages
