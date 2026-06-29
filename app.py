@@ -1720,35 +1720,36 @@ def page_overview(df: pd.DataFrame) -> None:
             args=(row, "best"),
         )
 
-    table_columns = [
-        "kickoff_time_dk",
-        "group",
-        "matchday",
-        "home_team",
-        "away_team",
-        "active_home_prob",
-        "active_draw_prob",
-        "active_away_prob",
-        "model_home_prob",
-        "model_draw_prob",
-        "model_away_prob",
-        "ds_home_odds",
-        "ds_draw_odds",
-        "ds_away_odds",
-        "best_home_odds",
-        "best_draw_odds",
-        "best_away_odds",
-        "recommended_outcome_ds",
-        "recommended_odds_ds",
-        "recommended_stake_ds",
-        "recommended_outcome_best",
-        "recommended_odds_best",
-        "recommended_bookmaker_best",
-        "recommended_stake_best",
-        "recommendation_status",
-        "draw_context_label",
-    ]
-    st.dataframe(format_overview_table(filtered[table_columns]), width="stretch", hide_index=True)
+    if st.toggle("Show technical table", value=False, key="overview_show_technical_table"):
+        table_columns = [
+            "kickoff_time_dk",
+            "group",
+            "matchday",
+            "home_team",
+            "away_team",
+            "active_home_prob",
+            "active_draw_prob",
+            "active_away_prob",
+            "model_home_prob",
+            "model_draw_prob",
+            "model_away_prob",
+            "ds_home_odds",
+            "ds_draw_odds",
+            "ds_away_odds",
+            "best_home_odds",
+            "best_draw_odds",
+            "best_away_odds",
+            "recommended_outcome_ds",
+            "recommended_odds_ds",
+            "recommended_stake_ds",
+            "recommended_outcome_best",
+            "recommended_odds_best",
+            "recommended_bookmaker_best",
+            "recommended_stake_best",
+            "recommendation_status",
+            "draw_context_label",
+        ]
+        st.dataframe(format_overview_table(filtered[table_columns]), width="stretch", hide_index=True)
 
 
 def render_value_bet_card(row, market: str, key_suffix: str) -> None:
