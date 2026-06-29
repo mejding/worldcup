@@ -44,6 +44,16 @@ def test_group_b_expected_teams_are_present_when_group_data_exists():
     assert {"Canada", "Bosnia and Herzegovina", "Qatar", "Switzerland"} <= teams
 
 
+def test_reference_fixture_file_contains_round_of_32_matches():
+    fixtures = load_fixture_dataset()
+    round_of_32 = fixtures[fixtures["stage"] == "Round of 32"]
+
+    assert len(round_of_32) == 16
+    assert {"Brazil", "Japan", "England", "Congo DR"} <= (
+        set(round_of_32["home_team"]) | set(round_of_32["away_team"])
+    )
+
+
 def test_empty_fixture_dataset_is_invalid():
     valid, messages = validate_fixture_dataset(pd.DataFrame(columns=REQUIRED_FIXTURE_COLUMNS))
 

@@ -150,6 +150,7 @@ def build_predictions_from_fixtures(fixtures_df: pd.DataFrame, fixture_source: s
                 "kickoff_utc": fixture["kickoff_utc"],
                 "fixture_source": fixture_source,
                 "group": fixture["group"],
+                "stage": fixture.get("stage", pd.NA),
                 "matchday": fixture["matchday"],
                 "home_team": fixture["home_team"],
                 "away_team": fixture["away_team"],

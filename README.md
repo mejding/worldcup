@@ -16,7 +16,7 @@ Streamlit MVP for a World Cup 2026 prediction and Kelly staking workflow.
 ## MVP Limitations
 
 - Official mode is the default and reads fixtures from `data/reference/worldcup_2026_fixtures.csv`.
-- The bundled reference currently includes all 72 known group-stage fixtures. It is still marked incomplete against the full 104-match tournament because knockout participants are not known until the group stage is played.
+- The bundled reference currently includes all 72 group-stage fixtures plus the known Round of 32 fixtures. It is still marked incomplete against the full 104-match tournament until the remaining knockout rounds are known.
 - Sample mode uses `data/sample_predictions.csv` only when explicitly selected in `Admin / Settings`; it is demo data and not an official fixture schedule.
 - Live mode can generate `data/processed/live_predictions.csv` from the official fixture reference plus odds API data. It does not silently fall back to sample data if live predictions are missing.
 - In sample mode, model probabilities, Danske Spil odds and best market odds are sample inputs.
@@ -107,7 +107,7 @@ data/reference/worldcup_2026_fixtures.csv
 
 Required fixture columns include `match_id`, `match_number`, `kickoff_utc`, `kickoff_local`, `kickoff_timezone`, teams, group/stage/matchday, city/stadium and source metadata. The validator checks required columns, duplicate match IDs, parseable kickoff times, completeness against 104 expected matches and known Group B corrections.
 
-The app intentionally keeps knockout matches out of user-facing predictions until the teams are known. This avoids showing placeholder fixtures such as `Winner Group A vs 3rd Group C/E/F/H/I` as if they were real betting matches.
+The app intentionally keeps placeholder knockout matches out of user-facing predictions until the teams are known. This avoids showing rows such as `Winner Group A vs 3rd Group C/E/F/H/I` as if they were real betting matches.
 
 Known correction covered by tests: Canada vs Bosnia and Herzegovina is on 2026-06-12, Group B, Toronto Stadium. Canada vs Switzerland must not appear on 2026-06-12.
 

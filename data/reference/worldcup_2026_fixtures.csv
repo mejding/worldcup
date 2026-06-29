@@ -71,3 +71,19 @@ WC2026-GRL-003,69,2026-06-23T20:00:00Z,2026-06-23 16:00,America/New_York,England
 WC2026-GRL-004,70,2026-06-23T23:00:00Z,2026-06-23 19:00,America/Toronto,Panama,Croatia,L,Group stage,2,Toronto,Toronto Stadium,FIFA match pages; public fixture list cross-check,2026-06-12,False,104
 WC2026-GRL-005,71,2026-06-27T21:00:00Z,2026-06-27 17:00,America/New_York,Panama,England,L,Group stage,3,New York New Jersey,New York New Jersey Stadium,FIFA match pages; public fixture list cross-check,2026-06-12,False,104
 WC2026-GRL-006,72,2026-06-27T21:00:00Z,2026-06-27 17:00,America/New_York,Croatia,Ghana,L,Group stage,3,Philadelphia,Philadelphia Stadium,FIFA match pages; public fixture list cross-check,2026-06-12,False,104
+WC2026-R32-001,73,2026-06-28T19:00:00Z,2026-06-28 12:00,America/Los_Angeles,South Africa,Canada,Knockout,Round of 32,4,Los Angeles,Los Angeles Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-002,74,2026-06-29T17:00:00Z,2026-06-29 12:00,America/Chicago,Brazil,Japan,Knockout,Round of 32,4,Houston,Houston Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-003,75,2026-06-29T20:30:00Z,2026-06-29 16:30,America/New_York,Germany,Paraguay,Knockout,Round of 32,4,Boston,Boston Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-004,76,2026-06-30T01:00:00Z,2026-06-29 20:00,America/Mexico_City,Netherlands,Morocco,Knockout,Round of 32,4,Monterrey,Monterrey Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-005,77,2026-06-30T17:00:00Z,2026-06-30 12:00,America/Chicago,Côte d'Ivoire,Norway,Knockout,Round of 32,4,Dallas,Dallas Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-006,78,2026-06-30T21:00:00Z,2026-06-30 17:00,America/New_York,France,Sweden,Knockout,Round of 32,4,New York New Jersey,New York New Jersey Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-007,79,2026-07-01T01:00:00Z,2026-06-30 19:00,America/Mexico_City,Mexico,Ecuador,Knockout,Round of 32,4,Mexico City,Mexico City Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-008,80,2026-07-01T16:00:00Z,2026-07-01 12:00,America/New_York,England,Congo DR,Knockout,Round of 32,4,Atlanta,Atlanta Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-009,81,2026-07-01T19:00:00Z,2026-07-01 12:00,America/Los_Angeles,Belgium,Senegal,Knockout,Round of 32,4,Seattle,Seattle Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-010,82,2026-07-02T00:00:00Z,2026-07-01 17:00,America/Los_Angeles,United States,Bosnia and Herzegovina,Knockout,Round of 32,4,San Francisco Bay Area,San Francisco Bay Area Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-011,83,2026-07-02T19:00:00Z,2026-07-02 12:00,America/Los_Angeles,Spain,Austria,Knockout,Round of 32,4,Los Angeles,Los Angeles Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-012,84,2026-07-02T23:00:00Z,2026-07-02 19:00,America/Toronto,Portugal,Croatia,Knockout,Round of 32,4,Toronto,Toronto Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-013,85,2026-07-03T03:00:00Z,2026-07-02 20:00,America/Vancouver,Switzerland,Algeria,Knockout,Round of 32,4,Vancouver,Vancouver Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-014,86,2026-07-03T18:00:00Z,2026-07-03 13:00,America/Chicago,Australia,Egypt,Knockout,Round of 32,4,Dallas,Dallas Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-015,87,2026-07-03T22:00:00Z,2026-07-03 18:00,America/New_York,Argentina,Cabo Verde,Knockout,Round of 32,4,Miami,Miami Stadium,The Guardian last-32 schedule,2026-06-29,False,104
+WC2026-R32-016,88,2026-07-04T01:30:00Z,2026-07-03 20:30,America/Chicago,Colombia,Ghana,Knockout,Round of 32,4,Kansas City,Kansas City Stadium,The Guardian last-32 schedule,2026-06-29,False,104
