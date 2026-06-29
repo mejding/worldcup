@@ -404,6 +404,20 @@ def prepare_best_available_predictions() -> list[str]:
             should_generate = True
             messages.append("Existing model prediction file used market probabilities as fallback. Regenerating ML predictions.")
         if should_generate:
+            if actual_mode == "live" and output_path.exists() and output_path.stat().st_size > 0:
+                try:
+                    _, model_warnings = apply_stored_model_predictions(
+                        base_df,
+                        output_path,
+                        output_path,
+                    )
+                    messages.extend(model_warnings)
+                    messages.append("Model loaded. Existing live ML predictions were matched to refreshed odds.")
+                    st.session_state.model_source = "historical_model_if_available"
+                    st.session_state["_prediction_prepare_signature"] = _prediction_prepare_signature()
+                    return messages
+                except Exception as exc:
+                    messages.append(f"Existing live ML predictions could not be reused. Details: {exc}")
             if actual_mode == "live" and MODEL_PREDICTIONS_PATH.exists():
                 try:
                     _, model_warnings = apply_stored_model_predictions(
