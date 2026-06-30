@@ -1447,8 +1447,13 @@ def refresh_odds_from_ui(button_label: str, key: str, use_container_width: bool 
     if not st.button(button_label, key=key, use_container_width=use_container_width):
         return
     try:
+        source_status = get_odds_source_status()
+        prefer_manual_odds = bool(source_status.get("manual_odds_valid"))
         with st.spinner("Refreshing odds..."):
-            result = refresh_live_odds_and_predictions(force_refresh=True)
+            result = refresh_live_odds_and_predictions(
+                force_refresh=True,
+                allow_api_fetch=not prefer_manual_odds,
+            )
         for warning in result.get("warnings", []):
             if (
                 ("Ignored" in str(warning) and "provider odds event" in str(warning))
