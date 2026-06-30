@@ -1885,7 +1885,18 @@ def page_match_detail(df: pd.DataFrame) -> None:
     if df.empty:
         empty_state("No matches loaded yet.")
         return
-    options = {f"{row.match_id} | {row.home_team} vs {row.away_team}": row.match_id for row in df.itertuples()}
+    active_df, archived_df = split_active_and_archived_matches(df)
+    if active_df.empty:
+        empty_state("No upcoming matches loaded. Completed matches are available in Match Archive.")
+        if not archived_df.empty and st.button("View archive", key="detail_view_archive"):
+            st.session_state.page = "Match Archive"
+            st.session_state.current_page = "Match Archive"
+            st.rerun()
+        return
+    if st.session_state.selected_match_id not in set(active_df["match_id"]):
+        st.session_state.selected_match_id = active_df.iloc[0]["match_id"]
+
+    options = {f"{row.match_id} | {row.home_team} vs {row.away_team}": row.match_id for row in active_df.itertuples()}
     selected_label = st.selectbox(
         "Vælg kamp",
         list(options.keys()),
@@ -1894,7 +1905,7 @@ def page_match_detail(df: pd.DataFrame) -> None:
         else 0,
     )
     st.session_state.selected_match_id = options[selected_label]
-    row = df[df["match_id"] == st.session_state.selected_match_id].iloc[0]
+    row = active_df[active_df["match_id"] == st.session_state.selected_match_id].iloc[0]
 
     st.title(match_label(row))
     st.caption(f"{row.get('kickoff_time_dk', row['kickoff_time'])} · Group {row['group']} · Matchday {row['matchday']}")
